@@ -1,0 +1,2 @@
+[pre_model_sync]
+keyless.patches.v1_0.create_user_handle_custom_field

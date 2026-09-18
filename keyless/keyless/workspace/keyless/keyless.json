@@ -1,0 +1,56 @@
+{
+  "charts": [],
+  "content": "[{\"id\":\"header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Keyless</span>\",\"col\":12}},{\"id\":\"shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Settings\",\"col\":4}},{\"id\":\"shortcut-2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Passkeys\",\"col\":4}},{\"id\":\"shortcut-3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Audit Log\",\"col\":4}}]",
+  "creation": "2026-09-18 12:00:00.000000",
+  "custom_blocks": [],
+  "docstatus": 0,
+  "doctype": "Workspace",
+  "for_user": "",
+  "hide_custom": 0,
+  "icon": "lock",
+  "idx": 0,
+  "is_hidden": 0,
+  "label": "Keyless",
+  "links": [],
+  "modified": "2026-09-18 12:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Keyless",
+  "name": "Keyless",
+  "number_cards": [],
+  "owner": "Administrator",
+  "parent_page": "",
+  "public": 1,
+  "quick_lists": [],
+  "restrict_to_page_sharing": 0,
+  "roles": [
+    {
+      "role": "System Manager"
+    }
+  ],
+  "sequence_id": 22.0,
+  "shortcuts": [
+    {
+      "color": "Grey",
+      "doc_view": "",
+      "label": "Settings",
+      "link_to": "Keyless Settings",
+      "type": "DocType"
+    },
+    {
+      "color": "Grey",
+      "doc_view": "",
+      "label": "Passkeys",
+      "link_to": "User Passkey",
+      "type": "DocType"
+    },
+    {
+      "color": "Grey",
+      "doc_view": "",
+      "label": "Audit Log",
+      "link_to": "Keyless Audit Log",
+      "stats_filter": "[]",
+      "type": "DocType"
+    }
+  ],
+  "title": "Keyless"
+}

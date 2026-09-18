@@ -1,0 +1,53 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Sign in") }} · {{ app_name }}{% endblock %}
+
+{% block page_content %}
+<section class="keyless-login" data-otp-length="{{ otp_length }}">
+	<div class="keyless-login__card">
+		<img class="keyless-login__mark" src="{{ logo }}" alt="{{ app_name }}" width="36" height="36">
+		<p class="keyless-login__eyebrow">{{ app_name }}</p>
+		<h1>{{ _("Sign in without a password") }}</h1>
+		<p class="keyless-login__lede">{{ _("Use a passkey, an email code, or a one-time link.") }}</p>
+
+		{% if not keyless_enabled %}
+			<p class="keyless-login__error">{{ _("Keyless is not enabled on this site.") }}</p>
+		{% else %}
+			{% if enable_passkeys %}
+			<button type="button" class="keyless-btn keyless-btn--primary" id="keyless-passkey">
+				{{ _("Continue with passkey") }}
+			</button>
+			{% endif %}
+
+			{% if enable_email_otp or enable_magic_link %}
+			<form id="keyless-email-form" class="keyless-form">
+				<label for="keyless-email">{{ _("Work email") }}</label>
+				<input id="keyless-email" name="email" type="email" autocomplete="username webauthn" required placeholder="you@company.com">
+				<div class="keyless-form__row">
+					{% if enable_email_otp %}
+					<button type="submit" class="keyless-btn" id="keyless-otp">{{ _("Email me a code") }}</button>
+					{% endif %}
+					{% if enable_magic_link %}
+					<button type="button" class="keyless-btn keyless-btn--ghost" id="keyless-link">{{ _("Send a sign-in link") }}</button>
+					{% endif %}
+				</div>
+			</form>
+
+			<form id="keyless-otp-form" class="keyless-form" hidden>
+				<label for="keyless-otp-input">{{ _("Six-digit code") }}</label>
+				<input id="keyless-otp-input" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]*">
+				<button type="submit" class="keyless-btn keyless-btn--primary">{{ _("Verify code") }}</button>
+			</form>
+			{% endif %}
+
+			<p class="keyless-login__status" id="keyless-status" role="status"></p>
+
+			{% if not disable_password %}
+			<p class="keyless-login__alt">
+				<a href="/login">{{ _("Use a password instead") }}</a>
+			</p>
+			{% endif %}
+		{% endif %}
+	</div>
+</section>
+{% endblock %}

@@ -1,0 +1,67 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "creation": "2026-09-18 12:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "user",
+    "code_hash",
+    "used",
+    "used_on"
+  ],
+  "fields": [
+    {
+      "fieldname": "user",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "label": "User",
+      "options": "User",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "code_hash",
+      "fieldtype": "Data",
+      "hidden": 1,
+      "label": "Code Hash",
+      "length": 64,
+      "read_only": 1,
+      "reqd": 1
+    },
+    {
+      "default": "0",
+      "fieldname": "used",
+      "fieldtype": "Check",
+      "in_list_view": 1,
+      "label": "Used",
+      "read_only": 1
+    },
+    {
+      "fieldname": "used_on",
+      "fieldtype": "Datetime",
+      "label": "Used On",
+      "read_only": 1
+    }
+  ],
+  "links": [],
+  "modified": "2026-09-18 12:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Keyless",
+  "name": "Keyless Backup Code",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "read": 1,
+      "role": "System Manager",
+      "write": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}

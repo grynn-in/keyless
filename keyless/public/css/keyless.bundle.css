@@ -1,0 +1,5 @@
+/* Desk: keep native Frappe chrome. Only tighten the User form Keyless section. */
+.frappe-control[data-fieldname="keyless_user_handle"] input {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px;
+}

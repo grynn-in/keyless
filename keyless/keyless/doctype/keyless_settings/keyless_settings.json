@@ -1,0 +1,216 @@
+{
+  "actions": [],
+  "creation": "2026-09-18 12:00:00.000000",
+  "doctype": "DocType",
+  "document_type": "Setup",
+  "engine": "InnoDB",
+  "field_order": [
+    "enabled",
+    "column_break_policy",
+    "replace_standard_login",
+    "section_factors",
+    "enable_passkeys",
+    "enable_magic_link",
+    "enable_email_otp",
+    "enable_backup_codes",
+    "column_break_factors",
+    "disable_password_login",
+    "allow_administrator_password",
+    "allow_passwordless_signup",
+    "hide_user_enumeration",
+    "section_otp",
+    "otp_length",
+    "otp_expiry_seconds",
+    "max_otp_attempts",
+    "column_break_otp",
+    "magic_link_expiry_minutes",
+    "rate_limit_per_hour",
+    "audit_retention_days",
+    "section_webauthn",
+    "rp_name",
+    "rp_id",
+    "column_break_webauthn",
+    "passkey_user_verification",
+    "require_passkey_for_system_users"
+  ],
+  "fields": [
+    {
+      "default": "1",
+      "fieldname": "enabled",
+      "fieldtype": "Check",
+      "label": "Enable Keyless"
+    },
+    {
+      "fieldname": "column_break_policy",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "0",
+      "description": "Redirect /login to /keyless/login",
+      "fieldname": "replace_standard_login",
+      "fieldtype": "Check",
+      "label": "Replace Standard Login Page"
+    },
+    {
+      "fieldname": "section_factors",
+      "fieldtype": "Section Break",
+      "label": "Authenticators"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_passkeys",
+      "fieldtype": "Check",
+      "label": "Passkeys (WebAuthn)"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_magic_link",
+      "fieldtype": "Check",
+      "label": "Email Magic Link"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_email_otp",
+      "fieldtype": "Check",
+      "label": "Email OTP"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_backup_codes",
+      "fieldtype": "Check",
+      "label": "Backup Codes"
+    },
+    {
+      "fieldname": "column_break_factors",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "0",
+      "description": "Block usr/pwd on /api/method/login. Administrator may still sign in if break-glass is on.",
+      "fieldname": "disable_password_login",
+      "fieldtype": "Check",
+      "label": "Disable Password Login"
+    },
+    {
+      "default": "1",
+      "fieldname": "allow_administrator_password",
+      "fieldtype": "Check",
+      "label": "Allow Administrator Password (Break-glass)"
+    },
+    {
+      "default": "0",
+      "fieldname": "allow_passwordless_signup",
+      "fieldtype": "Check",
+      "label": "Allow Passwordless Signup"
+    },
+    {
+      "default": "1",
+      "description": "Always return success when requesting OTP/link for unknown emails.",
+      "fieldname": "hide_user_enumeration",
+      "fieldtype": "Check",
+      "label": "Hide User Enumeration"
+    },
+    {
+      "fieldname": "section_otp",
+      "fieldtype": "Section Break",
+      "label": "OTP and Rate Limits"
+    },
+    {
+      "default": "6",
+      "fieldname": "otp_length",
+      "fieldtype": "Int",
+      "label": "OTP Length"
+    },
+    {
+      "default": "300",
+      "fieldname": "otp_expiry_seconds",
+      "fieldtype": "Int",
+      "label": "OTP Expiry (seconds)"
+    },
+    {
+      "default": "5",
+      "fieldname": "max_otp_attempts",
+      "fieldtype": "Int",
+      "label": "Max OTP Attempts"
+    },
+    {
+      "fieldname": "column_break_otp",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "10",
+      "fieldname": "magic_link_expiry_minutes",
+      "fieldtype": "Int",
+      "label": "Magic Link Expiry (minutes)"
+    },
+    {
+      "default": "5",
+      "fieldname": "rate_limit_per_hour",
+      "fieldtype": "Int",
+      "label": "Rate Limit per Hour"
+    },
+    {
+      "default": "90",
+      "fieldname": "audit_retention_days",
+      "fieldtype": "Int",
+      "label": "Audit Retention (days)"
+    },
+    {
+      "fieldname": "section_webauthn",
+      "fieldtype": "Section Break",
+      "label": "WebAuthn Relying Party"
+    },
+    {
+      "description": "Shown in the OS passkey prompt. Defaults to the site app name.",
+      "fieldname": "rp_name",
+      "fieldtype": "Data",
+      "label": "RP Name"
+    },
+    {
+      "description": "Must match the site hostname (no scheme, no port). Leave blank to use the current host.",
+      "fieldname": "rp_id",
+      "fieldtype": "Data",
+      "label": "RP ID"
+    },
+    {
+      "fieldname": "column_break_webauthn",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "required",
+      "fieldname": "passkey_user_verification",
+      "fieldtype": "Select",
+      "label": "User Verification",
+      "options": "required\npreferred\ndiscouraged"
+    },
+    {
+      "default": "0",
+      "fieldname": "require_passkey_for_system_users",
+      "fieldtype": "Check",
+      "label": "Require a Passkey for System Users"
+    }
+  ],
+  "issingle": 1,
+  "links": [],
+  "modified": "2026-09-18 12:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Keyless",
+  "name": "Keyless Settings",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "email": 1,
+      "print": 1,
+      "read": 1,
+      "role": "System Manager",
+      "share": 1,
+      "write": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}
