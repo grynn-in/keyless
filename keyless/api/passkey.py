@@ -32,13 +32,48 @@ def _uv_requirement(settings):
 	return mapping.get(value, UserVerificationRequirement.REQUIRED)
 
 
+def _challenge_bytes(stored) -> bytes:
+	"""py_webauthn compares against decoded clientDataJSON.challenge (bytes).
+
+	We persist the same base64url string we sent the browser, then decode here.
+	Passing the string through as expected_challenge always fails.
+	"""
+	from webauthn.helpers import base64url_to_bytes
+
+	if isinstance(stored, (bytes, bytearray, memoryview)):
+		return bytes(stored)
+	if not stored:
+		frappe.throw(_("Registration challenge expired"), frappe.AuthenticationError)
+	return base64url_to_bytes(str(stored))
+
+
+def _store_options_challenge(options, *, kind: str, user: str | None) -> tuple[str, dict]:
+	from webauthn import options_to_json
+	from webauthn.helpers import bytes_to_base64url
+
+	payload = json.loads(options_to_json(options))
+	# Persist the exact challenge string the client will round-trip, not a
+	# second encoding of options.challenge that might differ in padding.
+	challenge_b64 = payload.get("challenge") or bytes_to_base64url(options.challenge)
+	challenge_id = random_token(16)
+	store_challenge(
+		challenge_id,
+		{"type": kind, "user": user, "challenge": challenge_b64},
+		expires_in_sec=300,
+	)
+	payload["challenge_id"] = challenge_id
+	return challenge_id, payload
+
+
 @frappe.whitelist()
 def registration_options():
 	"""Start passkey registration for the current user."""
-	from webauthn import generate_registration_options, options_to_json
+	from webauthn import generate_registration_options
+	from webauthn.helpers import base64url_to_bytes
 	from webauthn.helpers.structs import (
 		AttestationConveyancePreference,
 		AuthenticatorSelectionCriteria,
+		PublicKeyCredentialDescriptor,
 		ResidentKeyRequirement,
 	)
 
@@ -52,14 +87,9 @@ def registration_options():
 	handle = ensure_user_handle(user)
 	existing = frappe.get_all("User Passkey", filters={"user": user}, fields=["credential_id"])
 
-	from webauthn.helpers import bytes_to_base64url
-	from webauthn.helpers.structs import PublicKeyCredentialDescriptor
-
 	exclude = []
 	for row in existing:
 		try:
-			from webauthn.helpers import base64url_to_bytes
-
 			exclude.append(PublicKeyCredentialDescriptor(id=base64url_to_bytes(row.credential_id)))
 		except Exception:
 			continue
@@ -78,18 +108,7 @@ def registration_options():
 		),
 		exclude_credentials=exclude or None,
 	)
-	challenge_id = random_token(16)
-	store_challenge(
-		challenge_id,
-		{
-			"type": "registration",
-			"user": user,
-			"challenge": bytes_to_base64url(options.challenge),
-		},
-		expires_in_sec=300,
-	)
-	payload = json.loads(options_to_json(options))
-	payload["challenge_id"] = challenge_id
+	_challenge_id, payload = _store_options_challenge(options, kind="registration", user=user)
 	return payload
 
 
@@ -97,6 +116,7 @@ def registration_options():
 def verify_registration(credential: str | dict, challenge_id: str, friendly_name: str | None = None):
 	from webauthn import verify_registration_response
 	from webauthn.helpers import bytes_to_base64url
+	from webauthn.helpers.exceptions import InvalidRegistrationResponse, WebAuthnException
 
 	settings = require_enabled()
 	if frappe.session.user == "Guest":
@@ -107,13 +127,23 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 		frappe.throw(_("Registration challenge expired"), frappe.AuthenticationError)
 
 	cred = json.loads(credential) if isinstance(credential, str) else credential
-	verification = verify_registration_response(
-		credential=cred,
-		expected_challenge=challenge["challenge"],
-		expected_origin=client_origin(),
-		expected_rp_id=rp_id(),
-		require_user_verification=settings.passkey_user_verification == "required",
-	)
+	try:
+		verification = verify_registration_response(
+			credential=cred,
+			expected_challenge=_challenge_bytes(challenge["challenge"]),
+			expected_origin=client_origin(),
+			expected_rp_id=rp_id(),
+			require_user_verification=settings.passkey_user_verification == "required",
+		)
+	except (InvalidRegistrationResponse, WebAuthnException) as e:
+		log_event(
+			"passkey_register_failed",
+			user=frappe.session.user,
+			method="passkey",
+			success=False,
+			detail=str(e)[:140],
+		)
+		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
 
 	credential_id = bytes_to_base64url(verification.credential_id)
 	if frappe.db.exists("User Passkey", {"credential_id": credential_id}):
@@ -141,8 +171,8 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=get_rate_limit, seconds=60 * 60)
 def authentication_options(email: str | None = None):
-	from webauthn import generate_authentication_options, options_to_json
-	from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
+	from webauthn import generate_authentication_options
+	from webauthn.helpers import base64url_to_bytes
 	from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
 	settings = require_enabled()
@@ -169,18 +199,7 @@ def authentication_options(email: str | None = None):
 		user_verification=_uv_requirement(settings),
 		allow_credentials=allow_credentials or None,
 	)
-	challenge_id = random_token(16)
-	store_challenge(
-		challenge_id,
-		{
-			"type": "authentication",
-			"user": user,
-			"challenge": bytes_to_base64url(options.challenge),
-		},
-		expires_in_sec=300,
-	)
-	payload = json.loads(options_to_json(options))
-	payload["challenge_id"] = challenge_id
+	_challenge_id, payload = _store_options_challenge(options, kind="authentication", user=user)
 	return payload
 
 
@@ -188,7 +207,8 @@ def authentication_options(email: str | None = None):
 @rate_limit(limit=get_rate_limit, seconds=60 * 60)
 def verify_authentication(credential: str | dict, challenge_id: str):
 	from webauthn import verify_authentication_response
-	from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
+	from webauthn.helpers import base64url_to_bytes
+	from webauthn.helpers.exceptions import InvalidAuthenticationResponse, WebAuthnException
 
 	settings = require_enabled()
 	if not settings.enable_passkeys:
@@ -217,15 +237,19 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 	if challenge.get("user") and challenge["user"] != passkey.user:
 		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
 
-	verification = verify_authentication_response(
-		credential=cred,
-		expected_challenge=challenge["challenge"],
-		expected_origin=client_origin(),
-		expected_rp_id=rp_id(),
-		credential_public_key=base64url_to_bytes(passkey.public_key),
-		credential_current_sign_count=int(passkey.sign_count or 0),
-		require_user_verification=settings.passkey_user_verification == "required",
-	)
+	try:
+		verification = verify_authentication_response(
+			credential=cred,
+			expected_challenge=_challenge_bytes(challenge["challenge"]),
+			expected_origin=client_origin(),
+			expected_rp_id=rp_id(),
+			credential_public_key=base64url_to_bytes(passkey.public_key),
+			credential_current_sign_count=int(passkey.sign_count or 0),
+			require_user_verification=settings.passkey_user_verification == "required",
+		)
+	except (InvalidAuthenticationResponse, WebAuthnException) as e:
+		log_event("passkey_failed", method="passkey", success=False, detail=str(e)[:140])
+		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
 
 	frappe.db.set_value(
 		"User Passkey",

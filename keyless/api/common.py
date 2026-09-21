@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from urllib.parse import urlparse
 
 import frappe
 from frappe import _
@@ -37,12 +38,22 @@ def constant_time_delay():
 
 
 def client_origin() -> str:
+	"""Origin the authenticator signed. Prefer the browser Origin header.
+
+	`frappe.utils.get_url()` follows site_config host_name and is often wrong
+	on a local bench (port 8000 vs 8001, http vs https).
+	"""
+	origin = (frappe.get_request_header("Origin") or "").strip().rstrip("/")
+	if origin and origin.lower() != "null":
+		return origin
+	request = getattr(frappe.local, "request", None)
+	if request is not None and request.host:
+		scheme = request.scheme or "http"
+		return f"{scheme}://{request.host}".rstrip("/")
 	return frappe.utils.get_url().rstrip("/")
 
 
 def rp_id() -> str:
-	from urllib.parse import urlparse
-
 	settings = get_settings()
 	if settings.rp_id:
 		return settings.rp_id
