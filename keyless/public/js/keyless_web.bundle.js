@@ -1,7 +1,10 @@
 /**
  * Website login: passkey + email OTP + magic link.
  * Loaded via web_include_js on every website page; binds only on /login and /keyless/login.
+ *
+ * Static import (not import()) so Frappe's esbuild IIFE bundle can inline the helper.
  */
+import { startAuthentication } from "./webauthn_client.js";
 
 (function () {
 	function $(sel, root) {
@@ -41,7 +44,6 @@
 	}
 
 	async function withPasskey(email) {
-		const { startAuthentication } = await import("/assets/keyless/js/webauthn_client.js");
 		const options = await call("keyless.api.passkey.authentication_options", { email: email || null });
 		const credential = await startAuthentication(options);
 		const result = await call("keyless.api.passkey.verify_authentication", {
@@ -58,51 +60,63 @@
 		const emailInput = $("#keyless-email");
 		const otpForm = $("#keyless-otp-form");
 
-		$("#keyless-passkey")?.addEventListener("click", async () => {
-			try {
-				status("Waiting for your device…");
-				await withPasskey(emailInput?.value || null);
-			} catch (e) {
-				status(e.message || "Passkey failed", "error");
-			}
-		});
+		const passkeyBtn = $("#keyless-passkey");
+		if (passkeyBtn) {
+			passkeyBtn.addEventListener("click", async () => {
+				try {
+					status("Waiting for your device…");
+					await withPasskey(emailInput ? emailInput.value : null);
+				} catch (e) {
+					status(e.message || "Passkey failed", "error");
+				}
+			});
+		}
 
-		$("#keyless-email-form")?.addEventListener("submit", async (ev) => {
-			ev.preventDefault();
-			const email = emailInput.value;
-			try {
-				status("Sending a code…");
-				await call("keyless.api.otp.request_otp", { email });
-				otpForm.hidden = false;
-				status("Check your inbox for a short code.");
-				$("#keyless-otp-input")?.focus();
-			} catch (e) {
-				status(e.message, "error");
-			}
-		});
+		const emailForm = $("#keyless-email-form");
+		if (emailForm) {
+			emailForm.addEventListener("submit", async (ev) => {
+				ev.preventDefault();
+				const email = emailInput.value;
+				try {
+					status("Sending a code…");
+					await call("keyless.api.otp.request_otp", { email });
+					otpForm.hidden = false;
+					status("Check your inbox for a short code.");
+					const otpInput = $("#keyless-otp-input");
+					if (otpInput) otpInput.focus();
+				} catch (e) {
+					status(e.message, "error");
+				}
+			});
+		}
 
-		otpForm?.addEventListener("submit", async (ev) => {
-			ev.preventDefault();
-			try {
-				const result = await call("keyless.api.otp.verify_otp", {
-					email: emailInput.value,
-					otp: $("#keyless-otp-input").value,
-				});
-				window.location.href = result.home || "/app";
-			} catch (e) {
-				status(e.message, "error");
-			}
-		});
+		if (otpForm) {
+			otpForm.addEventListener("submit", async (ev) => {
+				ev.preventDefault();
+				try {
+					const result = await call("keyless.api.otp.verify_otp", {
+						email: emailInput.value,
+						otp: $("#keyless-otp-input").value,
+					});
+					window.location.href = result.home || "/app";
+				} catch (e) {
+					status(e.message, "error");
+				}
+			});
+		}
 
-		$("#keyless-link")?.addEventListener("click", async () => {
-			try {
-				status("Sending a sign-in link…");
-				await call("keyless.api.magic_link.send_link", { email: emailInput.value });
-				status("Link sent. It expires in a few minutes.");
-			} catch (e) {
-				status(e.message, "error");
-			}
-		});
+		const linkBtn = $("#keyless-link");
+		if (linkBtn) {
+			linkBtn.addEventListener("click", async () => {
+				try {
+					status("Sending a sign-in link…");
+					await call("keyless.api.magic_link.send_link", { email: emailInput.value });
+					status("Link sent. It expires in a few minutes.");
+				} catch (e) {
+					status(e.message, "error");
+				}
+			});
+		}
 	}
 
 	if (document.readyState === "loading") {

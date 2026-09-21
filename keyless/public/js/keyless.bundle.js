@@ -1,3 +1,5 @@
+import { startRegistration } from "./webauthn_client.js";
+
 frappe.provide("keyless");
 
 keyless.boot = () => frappe.boot.keyless || { enabled: false };
@@ -22,7 +24,6 @@ keyless.register_passkey = async function (frm) {
 	}
 	try {
 		const options = await frappe.xcall("keyless.api.passkey.registration_options");
-		const { startRegistration } = await import("./webauthn_client.js");
 		const credential = await startRegistration(options);
 		const name = prompt(__("Device name"), __("This device"));
 		await frappe.xcall("keyless.api.passkey.verify_registration", {
