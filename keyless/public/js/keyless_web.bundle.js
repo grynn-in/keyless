@@ -1,7 +1,8 @@
 /**
  * Website login: passkey, email OTP, magic link and recovery codes.
  * Loaded via web_include_js on every website page; binds only on /keyless/login
- * (anything rendering `.keyless-login`).
+ * (anything rendering `.keyless-login`) and, to add a "Login with Passkey"
+ * option, on Frappe's standard /login.
  *
  * The page markup mirrors Frappe's login.html, so behaviour follows Frappe's
  * login.js where it can: hash steps (#login, #otp, #recovery), the
@@ -336,9 +337,97 @@ import { startAuthentication } from "./webauthn_client.js";
 		route();
 	}
 
-	if (document.readyState === "loading") {
-		document.addEventListener("DOMContentLoaded", bind);
-	} else {
+	// ---- Frappe's standard /login: add a "Login with Passkey" option ----
+	//
+	// Frappe's login.html has no extension point for extra login methods, so we
+	// add one button where Frappe renders its own alternatives ("Login with Email
+	// Link", social logins). Anything unexpected in the markup: do nothing.
+
+	function keylessLoginUrl() {
+		const target = redirectTo();
+		return "/keyless/login" + (target ? "?redirect-to=" + encodeURIComponent(target) : "");
+	}
+
+	function optionButton(label) {
+		const a = document.createElement("a");
+		a.href = keylessLoginUrl();
+		a.className = "btn btn-block btn-default btn-sm btn-login-option btn-login-with-keyless";
+		a.textContent = label;
+		return a;
+	}
+
+	function addStandardLoginOption(config) {
+		if (!config || !config.enabled) return;
+		if (!(config.enable_passkeys || config.enable_email_otp || config.enable_magic_link)) return;
+		const card = document.querySelector("section.for-login .login-content.page-card");
+		const form = card && card.querySelector("form.form-login");
+		if (!form || card.querySelector(".btn-login-with-keyless")) return;
+
+		const label = config.enable_passkeys ? t("Login with Passkey") : t("Passwordless Login");
+		const v16 = !!card.querySelector(".page-card-head");
+
+		if (v16) {
+			// v16: alternatives are .btn-login-option links inside .page-card-actions.
+			const actions = form.querySelector(".page-card-actions");
+			if (!actions) return;
+			const social = actions.querySelector(".social-logins");
+			actions.insertBefore(optionButton(label), social || null);
+			return;
+		}
+
+		// v15: alternatives live in .social-logins (with the "or" divider) inside
+		// an outer .page-card-body; create that block when Frappe did not render one.
+		const wrapper = document.createElement("div");
+		wrapper.className = "login-button-wrapper";
+		wrapper.appendChild(optionButton(label));
+		let buttons = form.querySelector(".social-logins .social-login-buttons");
+		if (buttons) {
+			const group = document.createElement("div");
+			group.className = "social-login-buttons";
+			group.appendChild(wrapper);
+			buttons.parentNode.appendChild(group);
+			return;
+		}
+		const body = document.createElement("div");
+		body.className = "page-card-body";
+		const social = document.createElement("div");
+		social.className = "social-logins text-center";
+		const divider = document.createElement("p");
+		divider.className = "text-muted login-divider";
+		divider.textContent = t("or");
+		buttons = document.createElement("div");
+		buttons.className = "social-login-buttons";
+		buttons.appendChild(wrapper);
+		social.appendChild(divider);
+		social.appendChild(buttons);
+		body.appendChild(social);
+		form.appendChild(body);
+	}
+
+	async function bindStandardLogin() {
+		if (!/^\/login\/?$/.test(window.location.pathname)) return;
+		if (!document.querySelector("section.for-login")) return;
+		try {
+			const res = await fetch("/api/method/keyless.api.settings.public_config", {
+				headers: { Accept: "application/json" },
+				credentials: "same-origin",
+			});
+			if (!res.ok) return;
+			const data = await res.json();
+			addStandardLoginOption(data.message);
+		} catch (e) {
+			/* Keyless missing or unreachable: leave Frappe's page alone. */
+		}
+	}
+
+	function init() {
 		bind();
+		bindStandardLogin();
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", init);
+	} else {
+		init();
 	}
 })();
