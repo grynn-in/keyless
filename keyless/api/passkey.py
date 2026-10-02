@@ -157,9 +157,13 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 			"public_key": bytes_to_base64url(verification.credential_public_key),
 			"sign_count": verification.sign_count,
 			"aaguid": str(verification.aaguid) if verification.aaguid else None,
-			"device_type": verification.credential_device_type or "platform",
+			# device_type is the WebAuthn authenticator attachment, reported by the
+			# browser on the credential. py_webauthn's credential_device_type
+			# (single_device / multi_device) is a different property; whether the
+			# credential syncs is already captured by backed_up.
+			"device_type": _authenticator_attachment(cred),
 			"backed_up": 1 if verification.credential_backed_up else 0,
-			"friendly_name": (friendly_name or "").strip() or _default_name(verification),
+			"friendly_name": (friendly_name or "").strip() or _default_name(cred),
 			"user_handle": frappe.db.get_value("User", frappe.session.user, "keyless_user_handle"),
 		}
 	)
@@ -292,6 +296,21 @@ def revoke_passkey(name: str):
 	return {"ok": True}
 
 
-def _default_name(verification) -> str:
-	kind = getattr(verification, "credential_device_type", None) or "passkey"
+AUTHENTICATOR_ATTACHMENTS = ("platform", "cross-platform")
+
+
+def _authenticator_attachment(cred) -> str | None:
+	"""Return the credential's authenticatorAttachment, or None when absent.
+
+	Browsers may omit it (older engines) or send an unexpected value. We store
+	nothing rather than guess, so an empty Device Type means "not reported".
+	"""
+	if not isinstance(cred, dict):
+		return None
+	value = cred.get("authenticatorAttachment")
+	return value if value in AUTHENTICATOR_ATTACHMENTS else None
+
+
+def _default_name(cred) -> str:
+	kind = _authenticator_attachment(cred) or "passkey"
 	return f"{kind} · {frappe.utils.pretty_date(frappe.utils.now_datetime())}"

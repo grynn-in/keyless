@@ -42,12 +42,12 @@
       "fieldtype": "Column Break"
     },
     {
-      "default": "platform",
+      "description": "WebAuthn authenticator attachment reported by the browser. Empty when the browser did not report it.",
       "fieldname": "device_type",
       "fieldtype": "Select",
       "in_list_view": 1,
       "label": "Device Type",
-      "options": "platform\ncross-platform"
+      "options": "\nplatform\ncross-platform"
     },
     {
       "default": "0",
@@ -108,7 +108,7 @@
   ],
   "index_web_pages_for_search": 0,
   "links": [],
-  "modified": "2026-09-18 12:00:00.000000",
+  "modified": "2026-10-03 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Keyless",
   "name": "User Passkey",

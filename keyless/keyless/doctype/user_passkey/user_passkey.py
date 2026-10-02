@@ -14,7 +14,7 @@ class UserPasskey(Document):
 		aaguid: DF.Data | None
 		backed_up: DF.Check
 		credential_id: DF.Data
-		device_type: DF.Literal["platform", "cross-platform"]
+		device_type: DF.Literal["", "platform", "cross-platform"]
 		friendly_name: DF.Data | None
 		last_used: DF.Datetime | None
 		public_key: DF.LongText
