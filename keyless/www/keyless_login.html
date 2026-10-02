@@ -1,53 +1,217 @@
 {% extends "templates/web.html" %}
+{#-
+	Mirrors frappe/www/login.html. Frappe v15 and v16 lay the card out differently
+	(v15: logo above the card, "or" divider, options inside .page-card-body;
+	v16: logo inside the card, options inside .page-card-actions), so the markup
+	follows the running version and Frappe's own login.bundle.css styles it.
+-#}
 
-{% block title %}{{ _("Sign in") }} · {{ app_name }}{% endblock %}
+{% block navbar %}
+{% if not frappe_v16 or show_language_picker %}
+	{{ super() }}
+{% endif %}
+{% endblock %}
 
-{% block page_content %}
-<section class="keyless-login" data-otp-length="{{ otp_length }}">
-	<div class="keyless-login__card">
-		<img class="keyless-login__mark" src="{{ logo }}" alt="{{ app_name }}" width="36" height="36">
-		<p class="keyless-login__eyebrow">{{ app_name }}</p>
-		<h1>{{ _("Sign in without a password") }}</h1>
-		<p class="keyless-login__lede">{{ _("Use a passkey, an email code, or a one-time link.") }}</p>
+{% block head_include %}
+{{ include_style('login.bundle.css') }}
+{% endblock %}
 
-		{% if not keyless_enabled %}
-			<p class="keyless-login__error">{{ _("Keyless is not enabled on this site.") }}</p>
-		{% else %}
-			{% if enable_passkeys %}
-			<button type="button" class="keyless-btn keyless-btn--primary" id="keyless-passkey">
-				{{ _("Continue with passkey") }}
-			</button>
-			{% endif %}
+{% macro card_links(links) %}
+	{% for link in links %}
+	<div class="text-center sign-up-message">
+		<a href="{{ link.href }}">{{ link.label }}</a>
+	</div>
+	{% endfor %}
+{% endmacro %}
 
-			{% if enable_email_otp or enable_magic_link %}
-			<form id="keyless-email-form" class="keyless-form">
-				<label for="keyless-email">{{ _("Work email") }}</label>
-				<input id="keyless-email" name="email" type="email" autocomplete="username webauthn" required placeholder="you@company.com">
-				<div class="keyless-form__row">
-					{% if enable_email_otp %}
-					<button type="submit" class="keyless-btn" id="keyless-otp">{{ _("Email me a code") }}</button>
-					{% endif %}
-					{% if enable_magic_link %}
-					<button type="button" class="keyless-btn keyless-btn--ghost" id="keyless-link">{{ _("Send a sign-in link") }}</button>
-					{% endif %}
-				</div>
-			</form>
-
-			<form id="keyless-otp-form" class="keyless-form" hidden>
-				<label for="keyless-otp-input">{{ _("Six-digit code") }}</label>
-				<input id="keyless-otp-input" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]*">
-				<button type="submit" class="keyless-btn keyless-btn--primary">{{ _("Verify code") }}</button>
-			</form>
-			{% endif %}
-
-			<p class="keyless-login__status" id="keyless-status" role="status"></p>
-
-			{% if not disable_password %}
-			<p class="keyless-login__alt">
-				<a href="/login">{{ _("Use a password instead") }}</a>
-			</p>
-			{% endif %}
+{% macro logo_section(title=null, subtitle=null) %}
+<div class="page-card-head">
+	<img class="app-logo" src="{{ logo }}" alt="{{ app_name }}">
+	{% if frappe_v16 %}
+	<div class="page-card-head-text">
+		<h4>{{ title or _("Sign In") }}</h4>
+		{% if subtitle %}
+		<p class="page-card-subtitle">{{ subtitle }}</p>
 		{% endif %}
 	</div>
+	{% else %}
+	<h4>{{ title or _("Login to {0}").format(app_name or _("Frappe")) }}</h4>
+	{% endif %}
+</div>
+{% endmacro %}
+
+{#- One login card. v15: head above the card, links below it; v16: both inside. -#}
+{% macro login_card(step, title=null, subtitle=null, hidden=false, links=[]) %}
+<section class="for-login keyless-step" data-keyless-step="{{ step }}" {% if hidden %}hidden{% endif %}>
+	{% if not frappe_v16 %}{{ logo_section(title) }}{% endif %}
+	<div class="login-content page-card">
+		{% if frappe_v16 %}{{ logo_section(title, subtitle) }}{% endif %}
+		{{ caller() }}
+		{% if frappe_v16 %}{{ card_links(links) }}{% endif %}
+	</div>
+	{% if not frappe_v16 %}{{ card_links(links) }}{% endif %}
 </section>
+{% endmacro %}
+
+{% macro status_line(id) %}
+<p class="keyless-status text-muted" id="{{ id }}" role="status" aria-live="polite"></p>
+{% endmacro %}
+
+{% macro email_field(id, autocomplete="username webauthn") %}
+<div class="form-group">
+	<label class="form-label{% if not frappe_v16 %} sr-only{% endif %}" for="{{ id }}">{{ _("Email") }}</label>
+	<div class="email-field">
+		<input type="email" id="{{ id }}" name="email" class="form-control"
+			placeholder="{{ _('jane@example.com') }}" required autocomplete="{{ autocomplete }}">
+		<svg class="field-icon email-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"
+			xmlns="http://www.w3.org/2000/svg">
+			<use class="es-lock" href="#es-line-email"></use>
+		</svg>
+	</div>
+	{% if frappe_v16 %}<p class="field-error"></p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro code_field(id, label, autocomplete, inputmode, maxlength) %}
+<div class="form-group">
+	<label class="form-label{% if not frappe_v16 %} sr-only{% endif %}" for="{{ id }}">{{ label }}</label>
+	<input type="text" id="{{ id }}" name="{{ id }}" class="form-control" placeholder="{{ label }}"
+		required autocomplete="{{ autocomplete }}" inputmode="{{ inputmode }}" maxlength="{{ maxlength }}"
+		autocapitalize="off" spellcheck="false">
+	{% if frappe_v16 %}<p class="field-error"></p>{% endif %}
+</div>
+{% endmacro %}
+
+{#- Secondary factors, styled as Frappe's "Login with ..." option buttons. -#}
+{% macro option_wrap() %}
+	{% if frappe_v16 %}{{ caller() }}{% else %}<div class="login-button-wrapper">{{ caller() }}</div>{% endif %}
+{% endmacro %}
+
+{% macro option_buttons() %}
+	{% if enable_passkeys and primary_action %}{% call option_wrap() %}
+	<button type="button" class="btn btn-block btn-default btn-sm btn-login-option" id="keyless-passkey"
+		data-keyless-action="passkey">{{ _("Login with Passkey") }}</button>
+	{% endcall %}{% endif %}
+	{% if enable_magic_link and primary_action != "link" %}{% call option_wrap() %}
+	<button type="button" class="btn btn-block btn-default btn-sm btn-login-option" id="keyless-link"
+		data-keyless-action="link">{{ _("Login with Email Link") }}</button>
+	{% endcall %}{% endif %}
+	{% if not disable_password %}{% call option_wrap() %}
+	<a href="{{ password_login_url }}" class="btn btn-block btn-default btn-sm btn-login-option btn-keyless-password">
+		{{ _("Login with Password") }}</a>
+	{% endcall %}{% endif %}
+{% endmacro %}
+
+{% macro primary_button() %}
+	{% if primary_action == "otp" %}
+	<button type="submit" class="btn btn-sm {{ primary_btn }} btn-block btn-login" id="keyless-otp"
+		data-keyless-action="otp">{{ _("Send Login Code") }}</button>
+	{% elif primary_action == "link" %}
+	<button type="submit" class="btn btn-sm {{ primary_btn }} btn-block btn-login" id="keyless-link"
+		data-keyless-action="link">{{ _("Send Login Link") }}</button>
+	{% elif enable_passkeys %}
+	<button type="submit" class="btn btn-sm {{ primary_btn }} btn-block btn-login" id="keyless-passkey"
+		data-keyless-action="passkey">{{ _("Login with Passkey") }}</button>
+	{% endif %}
+{% endmacro %}
+
+{% block page_content %}
+<div class="keyless-login" data-otp-length="{{ otp_length }}" data-frappe-major="{{ frappe_major }}"
+	{% if redirect_to %}data-redirect-to="{{ redirect_to }}"{% endif %}>
+	<noscript>
+		<div class="text-center my-5">
+			<h4>{{ _("Javascript is disabled on your browser") }}</h4>
+			<p class="text-muted">{{ _("You need to enable JavaScript for your app to work.") }}</p>
+		</div>
+	</noscript>
+
+	{% if not keyless_enabled %}
+	{% call login_card("login", subtitle=_("Welcome! Please sign in to continue.")) %}
+		<div class="page-card-body">
+			<p class="text-muted text-center">{{ _("Keyless is not enabled on this site.") }}</p>
+		</div>
+		<div class="page-card-actions">
+			<a href="{{ password_login_url }}" class="btn btn-sm {{ primary_btn }} btn-block btn-login">
+				{{ _("Login with Password") }}</a>
+		</div>
+	{% endcall %}
+	{% else %}
+
+	{#- Step 1: email + factors -#}
+	{% call login_card("login", subtitle=_("Welcome! Please sign in to continue."), links=footer_links) %}
+		<form class="form-signin form-login" role="form" id="keyless-email-form" novalidate>
+			{% if frappe_v16 %}
+			<div class="page-card-body">
+				{% if needs_email %}{{ email_field("keyless-email") }}{% endif %}
+				{{ status_line("keyless-status") }}
+			</div>
+			<div class="page-card-actions">
+				{{ primary_button() }}
+				{{ option_buttons() }}
+			</div>
+			{% else %}
+			<div class="page-card-body">
+				{% if needs_email %}
+				<div class="page-card-body">
+					{{ email_field("keyless-email") }}
+				</div>
+				{% endif %}
+				<div class="page-card-actions">
+					{{ primary_button() }}
+				</div>
+				{{ status_line("keyless-status") }}
+				{% if has_options %}
+				<div class="social-logins text-center">
+					<p class="text-muted login-divider">{{ _("or") }}</p>
+					<div class="social-login-buttons">
+						{{ option_buttons() }}
+					</div>
+				</div>
+				{% endif %}
+			</div>
+			{% endif %}
+		</form>
+	{% endcall %}
+
+	{#- Step 2: email code -#}
+	{% if enable_email_otp %}
+	{% call login_card("otp", _("Enter Login Code"), _("We sent a code to your email."), hidden=true, links=back_links) %}
+		<form class="form-signin form-login" role="form" id="keyless-otp-form" novalidate>
+			<div class="page-card-body">
+				{{ code_field("keyless-otp-input", _("Login Code"), "one-time-code", "numeric", otp_length) }}
+				{{ status_line("keyless-otp-status") }}
+			</div>
+			<div class="page-card-actions">
+				<button type="submit" class="btn btn-sm {{ primary_btn }} btn-block btn-login">
+					{{ _("Verify") }}</button>
+				<p class="text-center sign-up-message">
+					{{ _("Didn't receive the code?") }}
+					<a href="#" data-keyless-action="otp-resend">{{ _("Resend") }}</a>
+				</p>
+			</div>
+		</form>
+	{% endcall %}
+	{% endif %}
+
+	{#- Step 3: recovery (backup) code -#}
+	{% if enable_backup_codes %}
+	{% call login_card("recovery", _("Use a Recovery Code"), _("Enter one of the backup codes you saved."), hidden=true, links=back_links) %}
+		<form class="form-signin form-login" role="form" id="keyless-backup-form" novalidate>
+			<div class="page-card-body">
+				{{ email_field("keyless-backup-email", "username") }}
+				{{ code_field("keyless-backup-code", _("Recovery Code"), "off", "text", 20) }}
+				{{ status_line("keyless-backup-status") }}
+			</div>
+			<div class="page-card-actions">
+				<button type="submit" class="btn btn-sm {{ primary_btn }} btn-block btn-login">
+					{{ _("Verify") }}</button>
+			</div>
+		</form>
+	{% endcall %}
+	{% endif %}
+
+	{% endif %}
+</div>
 {% endblock %}
+
+{% block sidebar %}{% endblock %}

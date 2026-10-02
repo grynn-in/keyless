@@ -1,105 +1,34 @@
-.keyless-login {
-	min-height: 70vh;
-	display: grid;
-	place-items: center;
-	padding: 32px 16px;
+/*
+ * /keyless/login reuses Frappe's own login.bundle.css (included by the page),
+ * so only Keyless-specific pieces live here. Scoped: this file loads on every
+ * website page via web_include_css.
+ */
+.keyless-login [hidden] {
+	display: none !important;
 }
 
-.keyless-login__card {
-	width: min(420px, 100%);
-	background: #f7f4ec;
-	color: #161714;
-	border: 1px solid color-mix(in oklab, #161714 12%, transparent);
-	border-radius: 24px;
-	padding: 28px 24px 24px;
+.keyless-login .keyless-status {
+	margin: 0;
+	font-size: var(--text-sm, 12px);
+	line-height: 1.4;
+	text-align: left;
 }
 
-.keyless-login__mark {
-	display: block;
-	margin-bottom: 16px;
+.keyless-login .keyless-status:empty {
+	display: none;
 }
 
-.keyless-login__eyebrow {
-	font-size: 11px;
-	letter-spacing: 0.16em;
-	text-transform: uppercase;
-	color: #6d736c;
-	margin: 0 0 8px;
+.keyless-login .page-card-actions + .keyless-status {
+	margin-top: var(--margin-sm, 8px);
 }
 
-.keyless-login h1 {
-	font-size: 28px;
-	line-height: 1.15;
-	letter-spacing: -0.03em;
-	margin: 0 0 8px;
-}
-
-.keyless-login__lede {
-	color: #5c615a;
-	margin: 0 0 24px;
-}
-
-.keyless-form label {
-	display: block;
-	font-size: 13px;
-	font-weight: 500;
-	margin-bottom: 6px;
-}
-
-.keyless-form input {
-	width: 100%;
-	height: 44px;
-	border-radius: 10px;
-	border: 1px solid color-mix(in oklab, #161714 16%, transparent);
-	padding: 0 12px;
-	background: #fff;
-	margin-bottom: 12px;
-}
-
-.keyless-form__row {
+/* v16 hides its banners until login.js shows them; Keyless toggles via class. */
+.keyless-login .keyless-status.login-error-banner,
+.keyless-login .keyless-status.login-success-banner {
 	display: flex;
-	flex-direction: column;
-	gap: 8px;
 }
 
-.keyless-btn {
-	height: 44px;
-	border-radius: 10px;
-	border: 1px solid color-mix(in oklab, #161714 16%, transparent);
-	background: #fff;
-	color: #161714;
-	font-weight: 500;
-	cursor: pointer;
-}
-
-.keyless-btn--primary {
-	background: #161714;
-	color: #f7f4ec;
-	border-color: #161714;
+/* v15: option buttons are <button>, Frappe's are <a>; keep them full width. */
+.keyless-login .btn-login-option {
 	width: 100%;
-	margin-bottom: 16px;
-}
-
-.keyless-btn--ghost {
-	background: transparent;
-}
-
-.keyless-login__status {
-	min-height: 1.4em;
-	font-size: 13px;
-	color: #5c615a;
-	margin: 16px 0 0;
-}
-
-.keyless-login__status[data-kind="error"] {
-	color: #8f3a32;
-}
-
-.keyless-login__alt {
-	margin: 20px 0 0;
-	font-size: 13px;
-}
-
-.keyless-login__error {
-	color: #8f3a32;
 }
