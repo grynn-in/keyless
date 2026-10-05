@@ -1,0 +1,65 @@
+{
+ "app": "keyless",
+ "creation": "2026-10-05 12:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "lock",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "settings",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Settings",
+   "link_to": "Keyless Settings",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "fingerprint",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Passkeys",
+   "link_to": "User Passkey",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "key-round",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Backup Codes",
+   "link_to": "Keyless Backup Code",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "scroll-text",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Audit Log",
+   "link_to": "Keyless Audit Log",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-10-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Keyless",
+ "name": "Keyless",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "Keyless"
+}

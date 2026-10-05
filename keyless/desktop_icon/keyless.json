@@ -1,0 +1,21 @@
+{
+ "app": "keyless",
+ "bg_color": "gray",
+ "creation": "2026-10-05 12:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "App",
+ "idx": 0,
+ "label": "Keyless",
+ "link": "/desk/keyless",
+ "link_type": "External",
+ "logo_url": "/assets/keyless/images/keyless-mark.svg",
+ "modified": "2026-10-05 12:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Keyless",
+ "owner": "Administrator",
+ "restrict_removal": 0,
+ "roles": [],
+ "standard": 1
+}
