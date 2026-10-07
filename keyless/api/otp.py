@@ -5,7 +5,6 @@ from frappe import _
 from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import (
-	constant_time_delay,
 	get_rate_limit,
 	normalize_email,
 	pretend_success_if_unknown,
@@ -51,7 +50,6 @@ def request_otp(email: str):
 		_send_otp_mail(email, otp, expires)
 		log_event("otp_requested", user=user, method="email_otp", success=True)
 	else:
-		constant_time_delay()
 		if not settings.hide_user_enumeration:
 			frappe.throw(_("No active user found"), frappe.DoesNotExistError)
 		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
@@ -95,12 +93,13 @@ def _send_otp_mail(email: str, otp: str, expires: int):
 			subject=_("Your {0} sign-in code").format(app_name),
 			template="keyless_otp",
 			args={"otp": otp, "minutes": minutes, "app_name": app_name},
-			now=True,
+			# Queued, so known and unknown addresses do the same work (audit M-2).
+			now=False,
 			with_container=True,
 		)
-	except frappe.OutgoingEmailError:
+	except Exception:
+		# Same response as for an unknown address; the failure is only logged.
 		frappe.log_error(title="Keyless OTP mail failed", message=frappe.get_traceback())
-		frappe.throw(_("Could not send email. Try a passkey or contact your administrator."))
 
 
 def _home_for(user: str) -> str:

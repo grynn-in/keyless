@@ -13,6 +13,9 @@ from keyless.tokens import compare, digest
 from keyless.user import resolve_enabled_user
 
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+CODES_PER_USER = 10
+# Compared against when there is no real code, so every redemption does the same work.
+_DUMMY_HASH = "0" * 64
 
 
 def _generate_code() -> str:
@@ -31,7 +34,7 @@ def generate_codes():
 	user = frappe.session.user
 	frappe.db.delete("Keyless Backup Code", {"user": user})
 	plain = []
-	for _ in range(10):
+	for _i in range(CODES_PER_USER):
 		code = _generate_code()
 		plain.append(code)
 		frappe.get_doc(
@@ -54,22 +57,22 @@ def redeem(email: str, code: str):
 
 	email = normalize_email(email)
 	user = resolve_enabled_user(email)
-	if not user:
-		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)
-
+	# Same work whether the account exists, has codes left, or not: one query and
+	# exactly CODES_PER_USER hash checks, with no early exit (audit M-2).
 	rows = frappe.get_all(
 		"Keyless Backup Code",
-		filters={"user": user, "used": 0},
+		filters={"user": user or "", "used": 0},
 		fields=["name", "code_hash"],
+		limit=CODES_PER_USER,
 	)
-	match = None
+	hashes = [row.code_hash for row in rows] + [_DUMMY_HASH] * (CODES_PER_USER - len(rows))
 	normalized = (code or "").strip().upper()
-	for row in rows:
-		if compare(normalized, row.code_hash):
-			match = row
-			break
+	match = None
+	for i, expected in enumerate(hashes):
+		if compare(normalized, expected) and i < len(rows) and match is None:
+			match = rows[i]
 	if not match:
-		log_event("backup_failed", user=email, method="backup", success=False)
+		log_event("backup_failed", user=user or "Guest", method="backup", success=False)
 		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)
 
 	frappe.db.set_value(

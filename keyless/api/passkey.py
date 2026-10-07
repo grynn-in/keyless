@@ -201,36 +201,18 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=get_rate_limit, seconds=60 * 60)
-def authentication_options(email: str | None = None):
+def authentication_options():
+	"""Start a passkey sign-in. Discoverable credentials only: the response never
+	depends on who is signing in, so it cannot reveal which accounts have passkeys
+	(audit M-2, D6)."""
 	from webauthn import generate_authentication_options
-	from webauthn.helpers import base64url_to_bytes
-	from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
 	settings = require_enabled()
 	if not settings.enable_passkeys:
 		frappe.throw(_("Passkeys are disabled"))
 
-	allow_credentials = None
-	user = None
-	if email:
-		from keyless.user import resolve_enabled_user
-
-		user = resolve_enabled_user(email)
-		if user:
-			rows = frappe.get_all("User Passkey", filters={"user": user}, fields=["credential_id"])
-			allow_credentials = []
-			for row in rows:
-				try:
-					allow_credentials.append(PublicKeyCredentialDescriptor(id=base64url_to_bytes(row.credential_id)))
-				except Exception:
-					continue
-
-	options = generate_authentication_options(
-		rp_id=rp_id(),
-		user_verification=_uv_requirement(settings),
-		allow_credentials=allow_credentials or None,
-	)
-	_challenge_id, payload = _store_options_challenge(options, kind="authentication", user=user)
+	options = generate_authentication_options(rp_id=rp_id(), user_verification=_uv_requirement(settings))
+	_challenge_id, payload = _store_options_challenge(options, kind="authentication", user=None)
 	return payload
 
 

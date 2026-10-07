@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from urllib.parse import urlsplit
 
 import frappe
@@ -30,11 +29,6 @@ def normalize_email(email: str) -> str:
 def pretend_success_if_unknown(email: str) -> str | None:
 	"""Resolve an enabled user, or return None without leaking existence."""
 	return resolve_enabled_user(email)
-
-
-def constant_time_delay():
-	# Cheap equalisation so missing users don't return faster than mail send.
-	time.sleep(0.15)
 
 
 def site_origin() -> str:

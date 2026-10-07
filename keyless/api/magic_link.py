@@ -7,7 +7,6 @@ from frappe.utils import get_url
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
-	constant_time_delay,
 	get_rate_limit,
 	normalize_email,
 	pretend_success_if_unknown,
@@ -41,7 +40,6 @@ def send_link(email: str, redirect_to: str | None = None):
 		_send_link_mail(email, link, expiry_min)
 		log_event("magic_link_sent", user=user, method="magic_link", success=True)
 	else:
-		constant_time_delay()
 		if not settings.hide_user_enumeration:
 			frappe.throw(_("No active user found"), frappe.DoesNotExistError)
 		log_event("magic_link_sent", user=email, method="magic_link", success=False, detail="unknown")
@@ -84,9 +82,10 @@ def _send_link_mail(email: str, link: str, minutes: int):
 			subject=_("Sign in to {0}").format(app_name),
 			template="keyless_magic_link",
 			args={"link": link, "minutes": minutes, "app_name": app_name},
-			now=True,
+			# Queued, so known and unknown addresses do the same work (audit M-2).
+			now=False,
 			with_container=True,
 		)
-	except frappe.OutgoingEmailError:
+	except Exception:
+		# Same response as for an unknown address; the failure is only logged.
 		frappe.log_error(title="Keyless magic link mail failed", message=frappe.get_traceback())
-		frappe.throw(_("Could not send email. Try a passkey or contact your administrator."))

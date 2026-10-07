@@ -193,12 +193,9 @@ import { startAuthentication } from "./webauthn_client.js";
 
 	const actions = {
 		async passkey(form) {
-			const emailInput = $("#keyless-email");
 			status(t("Waiting for your device…"));
 			try {
-				const options = await call("keyless.api.passkey.authentication_options", {
-					email: emailValue(emailInput) || null,
-				});
+				const options = await call("keyless.api.passkey.authentication_options", {});
 				const credential = await startAuthentication(options);
 				const result = await call("keyless.api.passkey.verify_authentication", {
 					credential: JSON.stringify(credential),
