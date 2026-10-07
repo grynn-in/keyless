@@ -89,17 +89,27 @@ def verify_and_consume_otp(email: str, otp: str, max_attempts: int = 5) -> bool:
 	return True
 
 
-def store_magic_key(key: str, email: str, expires_in_sec: int) -> None:
-	# Key is unguessable; value is the bound email. Consume on first GET.
-	cache_set(MAGIC_CACHE_PREFIX, key, {"email": email, "created": str(now_datetime())}, expires_in_sec)
+def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str | None = None) -> None:
+	# Key is unguessable; value is the bound email and post-login target, kept
+	# server-side so the emailed URL cannot be edited to point elsewhere.
+	cache_set(
+		MAGIC_CACHE_PREFIX,
+		key,
+		{"email": email, "redirect_to": redirect_to, "created": str(now_datetime())},
+		expires_in_sec,
+	)
+
+
+def consume_magic_link(key: str) -> dict[str, Any] | None:
+	"""Return and delete the stored payload ({"email", "redirect_to", ...})."""
+	payload = cache_get(MAGIC_CACHE_PREFIX, key)
+	cache_delete(MAGIC_CACHE_PREFIX, key)
+	return payload or None
 
 
 def consume_magic_key(key: str) -> str | None:
-	payload = cache_get(MAGIC_CACHE_PREFIX, key)
-	cache_delete(MAGIC_CACHE_PREFIX, key)
-	if not payload:
-		return None
-	return payload.get("email")
+	payload = consume_magic_link(key)
+	return payload.get("email") if payload else None
 
 
 def store_challenge(challenge_id: str, payload: dict[str, Any], expires_in_sec: int = 300) -> None:

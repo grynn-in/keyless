@@ -100,3 +100,8 @@ def _set_settings(values: dict) -> None:
 	frappe.db.commit()
 	frappe.clear_document_cache("Keyless Settings", "Keyless Settings")
 	frappe.clear_cache(doctype="Keyless Settings")
+
+
+def reset_rate_limits() -> None:
+	"""Clear Frappe's @rate_limit counters so tests do not trip each other's limits."""
+	frappe.cache.delete_keys("rl:")

@@ -15,7 +15,8 @@ from keyless.api.common import (
 )
 from keyless.audit import log_event
 from keyless.auth import issue_session
-from keyless.tokens import consume_magic_key, random_token, store_magic_key
+from keyless.redirects import safe_redirect
+from keyless.tokens import consume_magic_link, random_token, store_magic_key
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -34,10 +35,9 @@ def send_link(email: str, redirect_to: str | None = None):
 
 	if user:
 		key = random_token(32)
-		store_magic_key(key, email, expiry_min * 60)
+		# The target stays in Redis with the key, never in the emailed URL (audit H-2).
+		store_magic_key(key, email, expiry_min * 60, redirect_to=safe_redirect(redirect_to))
 		link = get_url(f"/api/method/keyless.api.magic_link.login_via_link?key={key}", allow_header_override=False)
-		if redirect_to:
-			link += f"&redirect_to={frappe.utils.quote(redirect_to)}"
 		_send_link_mail(email, link, expiry_min)
 		log_event("magic_link_sent", user=user, method="magic_link", success=True)
 	else:
@@ -56,7 +56,8 @@ def login_via_link(key: str, redirect_to: str | None = None):
 	if not settings.enable_magic_link:
 		frappe.throw(_("Magic link login is disabled"))
 
-	email = consume_magic_key(key or "")
+	payload = consume_magic_link(key or "") or {}
+	email = payload.get("email")
 	user = pretend_success_if_unknown(email or "")
 	if not email or not user:
 		log_event("magic_link_failed", method="magic_link", success=False)
@@ -70,7 +71,9 @@ def login_via_link(key: str, redirect_to: str | None = None):
 
 	issue_session(user, method="magic_link")
 	desk_user = frappe.db.get_value("User", user, "user_type") == "System User"
-	redirect_post_login(desk_user=desk_user, redirect_to=redirect_to)
+	# Links sent before this change carry redirect_to in the URL; accept it only if it is safe.
+	target = safe_redirect(payload.get("redirect_to")) or safe_redirect(redirect_to)
+	redirect_post_login(desk_user=desk_user, redirect_to=target)
 
 
 def _send_link_mail(email: str, link: str, minutes: int):
