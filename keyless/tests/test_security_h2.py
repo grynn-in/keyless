@@ -52,7 +52,8 @@ class TestMagicLinkRedirect(FrappeTestCase):
 
 	def _follow(self, **params):
 		with keyless_settings(**LINK_ON), patch.object(magic_link, "log_event"):
-			set_request(method="GET", path="/api/method/keyless.api.magic_link.login_via_link")
+			# POST: since M-4, opening the link (GET) only shows a confirmation page.
+			set_request(method="POST", path="/api/method/keyless.api.magic_link.login_via_link")
 			frappe.local.request_ip = "127.0.0.1"
 			frappe.local.cookie_manager = CookieManager()
 			frappe.local.response = frappe._dict()

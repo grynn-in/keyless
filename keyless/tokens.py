@@ -127,11 +127,23 @@ def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str 
 	)
 
 
+def peek_magic_link(key: str) -> bool:
+	"""Whether a magic-link key is still valid, without using it up."""
+	return bool(key) and cache_get(MAGIC_CACHE_PREFIX, key) is not None
+
+
 def consume_magic_link(key: str) -> dict[str, Any] | None:
 	"""Return and delete the stored payload ({"email", "redirect_to", ...})."""
-	payload = cache_get(MAGIC_CACHE_PREFIX, key)
-	cache_delete(MAGIC_CACHE_PREFIX, key)
-	return payload or None
+	return _take(MAGIC_CACHE_PREFIX, key)
+
+
+def _take(prefix: str, key: str) -> dict[str, Any] | None:
+	"""Read and delete a one-shot value. Only the caller whose DELETE removed it gets
+	it, so parallel requests cannot both use the same link or challenge."""
+	payload = cache_get(prefix, key)
+	deleted = frappe.cache.delete(_raw_key(f"{prefix}{key}"))
+	cache_delete(prefix, key)
+	return payload if payload and deleted else None
 
 
 def consume_magic_key(key: str) -> str | None:
@@ -144,6 +156,4 @@ def store_challenge(challenge_id: str, payload: dict[str, Any], expires_in_sec: 
 
 
 def consume_challenge(challenge_id: str) -> dict[str, Any] | None:
-	payload = cache_get(CHALLENGE_CACHE_PREFIX, challenge_id)
-	cache_delete(CHALLENGE_CACHE_PREFIX, challenge_id)
-	return payload
+	return _take(CHALLENGE_CACHE_PREFIX, challenge_id)
