@@ -37,6 +37,8 @@ Login URL: `/keyless/login`. Set **Replace Standard Login Page** to send `/login
 
 ## Architecture (short)
 
+For what happens in each situation (which logins are blocked, what users see, what to check after upgrading), see [docs/authentication-policy.md](docs/authentication-policy.md).
+
 1. Guest POSTs to `keyless.api.*` (rate-limited, `allow_guest=True`).
 2. Challenge or OTP lives in Redis, peppered with `encryption_key`.
 3. On success the API calls `LoginManager.login_as(user)` — the same passwordless path Frappe uses for impersonation and email-link login.
