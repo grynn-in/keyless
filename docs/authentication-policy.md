@@ -2,7 +2,7 @@
 
 This page describes what Keyless does in each situation. It covers the
 security fixes on branch `fix/security-audit-2026-10` (audit of 7 October 2026):
-Phase 1 (C-1, C-2, H-4) and Phase 2 (H-1, H-2, H-3, H-5). Later phases will extend it.
+Phase 1 (C-1, C-2, H-4), Phase 2 (H-1, H-2, H-3, H-5) and Phase 3 (M-1 to M-4). Phase 4 will extend it.
 
 Settings named here live in **Keyless Settings** unless stated otherwise.
 "Blocked" means the request gets **HTTP 401** with the message
@@ -118,6 +118,41 @@ Notes:
   Administrator cannot use email OTP or magic links either. The password break-glass
   (rule 2) still works.
 
+### Email sign-in codes: limits
+
+Limits count per account (the email address, ignoring case and spaces), whatever IP the
+requests come from. Addresses with no account are counted the same way, so the limits
+reveal nothing. Hitting a limit gives HTTP 429, *"Too many attempts. Try again later."*
+
+| If… | Then… |
+|---|---|
+| An address has asked for more than **Rate Limit per Hour** codes in the last hour | Refused until the hour is up. |
+| An address has asked for more than **Daily Code Limit per Account** codes (default 10) in a day | Refused until the day is up. |
+| A code gets more than **Max OTP Attempts** wrong guesses | That code is deleted; request a new one. |
+| An account makes twice **Max OTP Attempts** wrong guesses in an hour, across all its codes | Every code for it is refused until the hour is up. Requesting a new code does not reset this. |
+| Someone guesses wrong | The code keeps its original expiry (**OTP Expiry**); guessing never extends it. |
+| Two requests send the right code at the same moment | Only one gets a session. |
+
+### What people see when they request a code or link
+
+| If… | Then… |
+|---|---|
+| The address has an account, has none, or the mail server fails | The same response: *"ok"*. Mail goes into Frappe's Email Queue instead of being sent during the request; a sending failure is only written to the Error Log. Check the Email Queue if people report missing codes. |
+| **Hide User Enumeration** is off | Unknown addresses get *"No active user found"*, as before. |
+
+### Magic links: confirm before signing in
+
+| If… | Then… |
+|---|---|
+| Someone opens the emailed link | A "Sign in" page with one button. Nothing is used up and nobody is signed in yet. Mail scanners and link previews, which only open links, can no longer burn them. |
+| They press **Sign in** | The link is used up and they are signed in. |
+| The link is used again, has expired, or is not real | *"This sign-in link is invalid or has expired."* (HTTP 403). |
+| Two requests confirm the same link at the same moment | Only one gets a session. |
+
+Not covered yet (D8 follow-up): a page on another site could still submit the confirmation
+form with an attacker's own link, signing the victim into the attacker's account, and a
+leaked link still works from any device until it expires.
+
 ---
 
 ## 4. Passkeys (User Passkey records)
@@ -134,11 +169,37 @@ Notes:
 
 ### Signing in with a passkey
 
+Passkey sign-in never asks for, or uses, an email address: the browser offers the passkeys
+it holds for this site. The sign-in options are the same for everyone, so they cannot reveal
+which accounts have passkeys. Passkeys registered as non-discoverable credentials cannot be
+used to sign in (Keyless has always registered discoverable ones).
+
 | If… | Then… |
 |---|---|
 | The passkey's response carries a user handle that is not the bound user's WebAuthn handle | Refused, *"Passkey does not match this account"*. Logged as `passkey_failed` / `user_handle_mismatch`. |
 | The response carries no user handle at all | Refused the same way. Keyless registers resident keys, and browsers always return the handle for those. |
 | The handle matches and the signature verifies | Signed in. |
+
+### Adding a passkey or generating new backup codes
+
+These changes need **recent re-authentication**: within the **Step-up Window** (default 5
+minutes).
+
+| If… | Then… |
+|---|---|
+| The person signed in within the window (any method) | Allowed. |
+| They confirmed with one of **their own** passkeys within the window | Allowed. |
+| They confirmed with a code emailed to them within the window | Allowed. Offered only when **Email OTP** is on and email factors are allowed for them (section 3). |
+| None of these | Refused (*"Confirm it's you before changing how you sign in."*). In Desk, Keyless asks them to confirm with a passkey, or else an emailed code, and then continues. With neither available, they must sign out and in again. |
+| They try to confirm with someone else's passkey | Refused. |
+
+Removing a passkey does not need re-authentication, but it is notified like the changes below.
+
+### Notifications
+
+| If… | Then… |
+|---|---|
+| A passkey is added or removed, or new backup codes are generated | An email goes to the account owner saying what changed and listing the passkeys now on the account, with a prompt to act if it was not them. It is queued, so a mail failure does not block the change. |
 
 ### Which websites a passkey works from
 
@@ -220,6 +281,8 @@ New or changed events in **Keyless Audit Log**:
 | `password_blocked` | A password login or OAuth password grant was blocked | `method` is `password` or `oauth_password`. For an unknown login name, `user` is `Guest` and the typed name is in `detail`. |
 | `factor_blocked` | Email OTP or magic link refused | `detail` is `passkey_required` (System User rule) or `frappe_2fa` (Frappe 2FA applies). |
 | `passkey_failed` | Passkey sign-in refused | New `detail` value: `user_handle_mismatch`. |
+| `step_up` / `step_up_failed` | Someone confirmed it was them (or failed to) before changing sign-in methods | `method` is `passkey` or `email_otp`. |
+| `backup_failed` | Recovery code refused | Now also logged for addresses with no account (`user` is `Guest`). |
 
 ---
 
@@ -238,6 +301,12 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Users with Frappe 2FA can no longer sign in with email OTP or magic links | Make sure they have a passkey (or backup codes) before upgrading, or they will need a password plus Frappe 2FA. |
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |
 | Login-page and magic-link targets must be same-site paths | Nothing for normal use. Links or integrations that pass full URLs as `redirect-to` now land on the default page. |
+| Magic links need one extra click | Tell users the link opens a "Sign in" page with a button. |
+| Codes and links are queued in the Email Queue | Make sure Frappe's email queue is running (scheduler enabled); otherwise codes arrive late or not at all. Mail failures are no longer shown to users. |
+| New limits on sign-in codes per account (hourly, daily, wrong guesses) | Review **Rate Limit per Hour**, **Daily Code Limit per Account** and **Max OTP Attempts**. |
+| Adding a passkey or generating backup codes asks people to confirm it's them | Nothing; set **Step-up Window** if 5 minutes does not suit. |
+| Passkey sign-in no longer uses the email field | Nothing for passkeys registered by Keyless. |
+| The reverse proxy must overwrite `X-Forwarded-For` | See the README's "Reverse proxy" section. |
 
 ---
 
@@ -252,8 +321,8 @@ Maintainer decisions taken during the 2026-10 security remediation.
 | D3 | Users Frappe 2FA applies to | Email OTP and magic link are refused. |
 | D4 | OAuth2 password grant when passwords are disabled | Blocked. |
 | D5 | Factors refused for System Users when passkeys are required | Email OTP and magic link. Backup codes stay as recovery. |
-| D6 | Passkey sign-in options for an email address | Pending (Phase 3, M-2): discoverable credentials only; the `email` parameter is dropped. |
-| D7 | Recent re-authentication before adding a passkey or rotating backup codes | Pending (Phase 3, M-3): a setting, default 5 minutes. |
-| D8 | Magic-link hardening | Pending (Phase 3, M-4): GET shows a confirmation page and only the POST signs in. Binding the link to the requesting browser is a later follow-up. |
+| D6 | Passkey sign-in options for an email address | Discoverable credentials only; the `email` parameter is dropped. |
+| D7 | Recent re-authentication before adding a passkey or rotating backup codes | Required, within a Step-up Window setting (default 5 minutes). |
+| D8 | Magic-link hardening | Opening the link shows a confirmation page; only its POST signs in. Binding the link to the requesting browser is a later follow-up. |
 | D9 | Passwords for System Users when passkeys are required | Allowed only when Frappe 2FA applies to the user. Never through the OAuth2 password grant, which skips 2FA. |
 | D10 | Backup codes for users with Frappe 2FA | Allowed, as the recovery path. |
