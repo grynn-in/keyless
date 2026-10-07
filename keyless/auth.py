@@ -13,7 +13,7 @@ import frappe
 
 from keyless import password_policy
 from keyless.audit import log_event
-from keyless.settings import get_settings, is_enabled
+from keyless.settings import is_enabled
 
 
 def request_auth():
@@ -53,17 +53,6 @@ def on_login(login_manager):
 	)
 
 
-def on_session_creation(login_manager):
-	if not is_enabled():
-		return
-	try:
-		settings = get_settings()
-		if settings.deny_password_sessions and getattr(login_manager, "resume", False) is False:
-			pass
-	except Exception:
-		frappe.log_error(title="Keyless on_session_creation", message=frappe.get_traceback())
-
-
 def on_logout(login_manager):
 	if not is_enabled():
 		return
@@ -79,6 +68,7 @@ def issue_session(user: str, *, method: str) -> None:
 	"""The only supported way to mint a Frappe session from a Keyless factor."""
 	from frappe.auth import LoginManager
 
+	password_policy.enforce_factor(user, method)
 	# Tells the on_login hook this session comes from a Keyless factor, not a password.
 	frappe.flags.keyless_login = method
 	try:

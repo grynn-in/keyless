@@ -33,13 +33,13 @@ website_route_rules = [
 ]
 
 auth_hooks = ["keyless.auth.request_auth"]
+before_request = ["keyless.password_policy.block_oauth_password_grant"]
 
 # Password policy is enforced here, not by overriding the `login` method:
 # Frappe logs in from LoginManager() before any whitelisted method runs.
 before_login = "keyless.auth.before_login"
 on_login = "keyless.auth.on_login"
 on_logout = "keyless.auth.on_logout"
-on_session_creation = "keyless.auth.on_session_creation"
 
 extend_bootinfo = "keyless.boot.extend_bootinfo"
 

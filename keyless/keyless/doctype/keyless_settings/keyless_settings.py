@@ -15,7 +15,6 @@ class KeylessSettings(Document):
 		from frappe.types import DF
 
 		allow_administrator_password: DF.Check
-		allow_passwordless_signup: DF.Check
 		audit_retention_days: DF.Int
 		disable_password_login: DF.Check
 		enable_backup_codes: DF.Check

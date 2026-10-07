@@ -16,7 +16,6 @@
     "column_break_factors",
     "disable_password_login",
     "allow_administrator_password",
-    "allow_passwordless_signup",
     "hide_user_enumeration",
     "section_otp",
     "otp_length",
@@ -96,12 +95,6 @@
       "fieldname": "allow_administrator_password",
       "fieldtype": "Check",
       "label": "Allow Administrator Password (Break-glass)"
-    },
-    {
-      "default": "0",
-      "fieldname": "allow_passwordless_signup",
-      "fieldtype": "Check",
-      "label": "Allow Passwordless Signup"
     },
     {
       "default": "1",
@@ -187,12 +180,13 @@
       "default": "0",
       "fieldname": "require_passkey_for_system_users",
       "fieldtype": "Check",
-      "label": "Require a Passkey for System Users"
+      "label": "Require a Passkey for System Users",
+      "description": "System Users cannot sign in with a password, email code or magic link. Passkeys and backup codes still work. Administrator break-glass is unaffected."
     }
   ],
   "issingle": 1,
   "links": [],
-  "modified": "2026-09-18 12:00:00.000000",
+  "modified": "2026-10-07 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Keyless",
   "name": "Keyless Settings",

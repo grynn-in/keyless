@@ -41,9 +41,47 @@ def password_blocked(user: str | None, settings) -> bool:
 		return False
 	if settings.disable_password_login:
 		return True
-	if user and frappe.db.get_value("User", user, "keyless_passwordless_only"):
+	if not user:
+		return False
+	flags = frappe.db.get_value("User", user, ["keyless_passwordless_only", "user_type"], as_dict=True) or {}
+	if flags.get("keyless_passwordless_only"):
+		return True
+	if settings.require_passkey_for_system_users and flags.get("user_type") == "System User":
 		return True
 	return False
+
+
+# Factors a System User may not use when require_passkey_for_system_users is on (D5).
+SYSTEM_USER_EXCLUDED_FACTORS = ("email_otp", "magic_link")
+
+
+def enforce_factor(user: str, method: str) -> None:
+	"""Raise AuthenticationError if `user` may not sign in with Keyless factor `method`."""
+	if method not in SYSTEM_USER_EXCLUDED_FACTORS or not is_enabled():
+		return
+	if not get_settings().require_passkey_for_system_users:
+		return
+	if frappe.db.get_value("User", user, "user_type") != "System User":
+		return
+	log_event("factor_blocked", user=user, method=method, success=False, detail="passkey_required")
+	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
+
+
+OAUTH_TOKEN_METHOD = "frappe.integrations.oauth2.get_token"
+
+
+def block_oauth_password_grant() -> None:
+	"""before_request hook. Frappe's OAuth2 provider accepts grant_type=password
+	and checks the password with LoginManager.authenticate(), which runs no
+	login hooks, so the policy is applied here (audit H-4b, D4)."""
+	form = frappe.form_dict
+	if form.get("grant_type") != "password":
+		return
+	request = getattr(frappe.local, "request", None)
+	path = (getattr(request, "path", "") or "").rstrip("/")
+	if not (path.endswith("/" + OAUTH_TOKEN_METHOD) or form.get("cmd") == OAUTH_TOKEN_METHOD):
+		return
+	enforce(login_name=form.get("username"), method="oauth_password")
 
 
 def enforce(*, login_name: str | None = None, user: str | None = None, method: str = "password") -> None:
