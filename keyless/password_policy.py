@@ -51,19 +51,28 @@ def password_blocked(user: str | None, settings) -> bool:
 	return False
 
 
-# Factors a System User may not use when require_passkey_for_system_users is on (D5).
-SYSTEM_USER_EXCLUDED_FACTORS = ("email_otp", "magic_link")
+# Factors that prove only control of the mailbox. They are refused for System
+# Users when require_passkey_for_system_users is on (D5), and for anyone
+# Frappe 2FA applies to, since login_as() skips Frappe's 2FA step (D3).
+EMAIL_FACTORS = ("email_otp", "magic_link")
 
 
 def enforce_factor(user: str, method: str) -> None:
 	"""Raise AuthenticationError if `user` may not sign in with Keyless factor `method`."""
-	if method not in SYSTEM_USER_EXCLUDED_FACTORS or not is_enabled():
+	if method not in EMAIL_FACTORS or not is_enabled():
 		return
-	if not get_settings().require_passkey_for_system_users:
+	from frappe.twofactor import two_factor_is_enabled
+
+	if (
+		get_settings().require_passkey_for_system_users
+		and frappe.db.get_value("User", user, "user_type") == "System User"
+	):
+		reason = "passkey_required"
+	elif two_factor_is_enabled(user=user):
+		reason = "frappe_2fa"
+	else:
 		return
-	if frappe.db.get_value("User", user, "user_type") != "System User":
-		return
-	log_event("factor_blocked", user=user, method=method, success=False, detail="passkey_required")
+	log_event("factor_blocked", user=user, method=method, success=False, detail=reason)
 	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
 
 

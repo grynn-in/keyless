@@ -1,4 +1,8 @@
-"""Install, migrate, uninstall. Create the settings single and User custom fields."""
+"""Install, migrate, uninstall. Create the User custom fields.
+
+Keyless Settings defaults come from keyless_settings.json. A fresh install
+leaves Keyless and every factor off until an administrator opts in (audit H-3).
+"""
 
 from __future__ import annotations
 
@@ -38,13 +42,11 @@ CUSTOM_FIELDS = {
 
 def after_install():
 	create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
-	_ensure_settings()
 	frappe.clear_cache()
 
 
 def after_migrate():
 	create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
-	_ensure_settings()
 
 
 def before_uninstall():
@@ -53,24 +55,3 @@ def before_uninstall():
 		if name:
 			frappe.delete_doc("Custom Field", name, force=True, ignore_permissions=True)
 
-
-def _ensure_settings():
-	if frappe.db.exists("Keyless Settings", "Keyless Settings"):
-		return
-	doc = frappe.new_doc("Keyless Settings")
-	doc.enabled = 1
-	doc.enable_passkeys = 1
-	doc.enable_magic_link = 1
-	doc.enable_email_otp = 1
-	doc.enable_backup_codes = 1
-	doc.hide_user_enumeration = 1
-	doc.allow_administrator_password = 1
-	doc.otp_length = 6
-	doc.otp_expiry_seconds = 300
-	doc.magic_link_expiry_minutes = 10
-	doc.max_otp_attempts = 5
-	doc.rate_limit_per_hour = 5
-	doc.passkey_user_verification = "required"
-	doc.audit_retention_days = 90
-	doc.flags.ignore_permissions = True
-	doc.insert()

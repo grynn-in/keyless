@@ -34,7 +34,7 @@
   ],
   "fields": [
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enabled",
       "fieldtype": "Check",
       "label": "Enable Keyless"
@@ -56,25 +56,25 @@
       "label": "Authenticators"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_passkeys",
       "fieldtype": "Check",
       "label": "Passkeys (WebAuthn)"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_magic_link",
       "fieldtype": "Check",
       "label": "Email Magic Link"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_email_otp",
       "fieldtype": "Check",
       "label": "Email OTP"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_backup_codes",
       "fieldtype": "Check",
       "label": "Backup Codes"
