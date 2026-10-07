@@ -32,12 +32,11 @@ website_route_rules = [
 	{"from_route": "/keyless/login", "to_route": "keyless_login"},
 ]
 
-override_whitelisted_methods = {
-	"login": "keyless.overrides.login.login",
-}
-
 auth_hooks = ["keyless.auth.request_auth"]
 
+# Password policy is enforced here, not by overriding the `login` method:
+# Frappe logs in from LoginManager() before any whitelisted method runs.
+before_login = "keyless.auth.before_login"
 on_login = "keyless.auth.on_login"
 on_logout = "keyless.auth.on_logout"
 on_session_creation = "keyless.auth.on_session_creation"

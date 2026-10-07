@@ -31,6 +31,8 @@ bench --site site.local clear-cache
 
 Open **Keyless Settings**. Enable the factors you want. Optionally **Disable Password Login** (Administrator can remain as break-glass).
 
+Keyless does not set Frappe's own System Settings **Disable Username/Password Login** (`disable_user_pass_login`). Frappe checks that flag at the start of every password login with no exception, so it also removes the Administrator break-glass. Turn it on yourself only if you accept that, and only once another way to sign in as Administrator exists.
+
 Login URL: `/keyless/login`. Set **Replace Standard Login Page** to send `/login` there from the website bundle.
 
 ## Architecture (short)
@@ -38,7 +40,7 @@ Login URL: `/keyless/login`. Set **Replace Standard Login Page** to send `/login
 1. Guest POSTs to `keyless.api.*` (rate-limited, `allow_guest=True`).
 2. Challenge or OTP lives in Redis, peppered with `encryption_key`.
 3. On success the API calls `LoginManager.login_as(user)` — the same passwordless path Frappe uses for impersonation and email-link login.
-4. `override_whitelisted_methods["login"]` blocks password POSTs when the policy says so.
+4. The `before_login` and `on_login` hooks block password logins when the policy says so. Frappe performs password login inside `LoginManager()` for `cmd=login` on any path and for `/api/method/login`, before any whitelisted method runs, so overriding the `login` method cannot enforce it. A blocked attempt gets the same response whether or not the password was correct.
 5. `auth_hooks` is reserved for future signed API assertions; browser login does **not** `frappe.set_user()` from a header.
 
 Do not fork `frappe/auth.py`. Do not store OTPs in MariaDB. Do not use SMS OTP (SIM swap). Do not make Administrator passwordless-only without an out-of-band recovery story.
