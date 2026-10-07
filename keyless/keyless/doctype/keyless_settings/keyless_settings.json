@@ -32,7 +32,8 @@
     "allowed_origins",
     "column_break_webauthn",
     "passkey_user_verification",
-    "require_passkey_for_system_users"
+    "require_passkey_for_system_users",
+    "step_up_window_minutes"
   ],
   "fields": [
     {
@@ -199,6 +200,13 @@
       "fieldtype": "Check",
       "label": "Require a Passkey for System Users",
       "description": "System Users cannot sign in with an email code or magic link, or with a password unless Frappe two-factor authentication applies to them. Passkeys and backup codes still work. Administrator break-glass is unaffected."
+    },
+    {
+      "default": "5",
+      "description": "How recently a user must have signed in, or confirmed with a passkey or email code, before adding a passkey or generating new backup codes.",
+      "fieldname": "step_up_window_minutes",
+      "fieldtype": "Int",
+      "label": "Step-up Window (minutes)"
     }
   ],
   "issingle": 1,

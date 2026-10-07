@@ -7,6 +7,7 @@ from frappe import _
 from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import get_rate_limit, normalize_email, require_enabled
+from keyless import notify, stepup
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import compare, digest
@@ -29,7 +30,8 @@ def generate_codes():
 	if not settings.enable_backup_codes:
 		frappe.throw(_("Backup codes are disabled"))
 	if frappe.session.user == "Guest":
-		frappe.throw(frappe.PermissionError)
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	stepup.require()
 
 	user = frappe.session.user
 	frappe.db.delete("Keyless Backup Code", {"user": user})
@@ -45,6 +47,9 @@ def generate_codes():
 			}
 		).insert(ignore_permissions=True)
 	log_event("backup_codes_generated", user=user, method="backup", success=True)
+	notify.sign_in_methods_changed(
+		user, _("New backup codes were generated for your account. The old codes no longer work.")
+	)
 	return {"ok": True, "codes": plain}
 
 

@@ -40,6 +40,8 @@ before_request = ["keyless.password_policy.block_oauth_password_grant"]
 before_login = "keyless.auth.before_login"
 on_login = "keyless.auth.on_login"
 on_logout = "keyless.auth.on_logout"
+# A fresh sign-in counts as recent re-authentication for step-up (audit M-3).
+on_session_creation = "keyless.stepup.on_session_creation"
 
 extend_bootinfo = "keyless.boot.extend_bootinfo"
 

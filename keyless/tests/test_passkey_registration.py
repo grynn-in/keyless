@@ -45,6 +45,8 @@ class TestPasskeyRegistrationDeviceType(FrappeTestCase):
 			patch.object(passkey, "allowed_origins", return_value=["http://localhost"]),
 			patch.object(passkey, "rp_id", return_value="localhost"),
 			patch.object(passkey, "log_event"),
+			patch.object(passkey.stepup, "require"),
+			patch.object(passkey.notify, "sign_in_methods_changed"),
 		]
 		for p in self.patches:
 			p.start()

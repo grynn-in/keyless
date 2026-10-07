@@ -15,6 +15,7 @@ from frappe import _
 from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import allowed_origins, get_rate_limit, require_enabled, rp_id, rp_name
+from keyless import notify, stepup
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import consume_challenge, random_token, store_challenge
@@ -109,6 +110,7 @@ def registration_options():
 		frappe.throw(_("Passkeys are disabled"))
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Sign in before registering a passkey"), frappe.PermissionError)
+	stepup.require()
 
 	user = frappe.session.user
 	handle = ensure_user_handle(user)
@@ -148,6 +150,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 	settings = require_enabled()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Sign in before registering a passkey"), frappe.PermissionError)
+	stepup.require()
 
 	challenge = consume_challenge(challenge_id)
 	if not challenge or challenge.get("type") != "registration" or challenge.get("user") != frappe.session.user:
@@ -196,6 +199,9 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 	)
 	doc.insert(ignore_permissions=True)
 	log_event("passkey_registered", user=frappe.session.user, method="passkey", success=True)
+	notify.sign_in_methods_changed(
+		frappe.session.user, _('A passkey named "{0}" was added to your account.').format(doc.friendly_name)
+	)
 	return {"ok": True, "name": doc.name, "friendly_name": doc.friendly_name}
 
 
@@ -216,21 +222,13 @@ def authentication_options():
 	return payload
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
-def verify_authentication(credential: str | dict, challenge_id: str):
+def verify_assertion(credential: str | dict, challenge: dict, settings):
+	"""Verify a passkey assertion against a consumed challenge and return the
+	User Passkey row (name, user). Used by sign-in and by step-up (audit M-3).
+	If the challenge names a user, the passkey must belong to that user."""
 	from webauthn import verify_authentication_response
 	from webauthn.helpers import base64url_to_bytes
 	from webauthn.helpers.exceptions import InvalidAuthenticationResponse, WebAuthnException
-
-	settings = require_enabled()
-	if not settings.enable_passkeys:
-		frappe.throw(_("Passkeys are disabled"))
-
-	challenge = consume_challenge(challenge_id)
-	if not challenge or challenge.get("type") != "authentication":
-		log_event("passkey_failed", method="passkey", success=False, detail="no_challenge")
-		frappe.throw(_("Sign-in challenge expired"), frappe.AuthenticationError)
 
 	cred = json.loads(credential) if isinstance(credential, str) else credential
 	raw_id = cred.get("id") or cred.get("rawId")
@@ -277,6 +275,22 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		},
 		update_modified=False,
 	)
+	return passkey
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+def verify_authentication(credential: str | dict, challenge_id: str):
+	settings = require_enabled()
+	if not settings.enable_passkeys:
+		frappe.throw(_("Passkeys are disabled"))
+
+	challenge = consume_challenge(challenge_id)
+	if not challenge or challenge.get("type") != "authentication":
+		log_event("passkey_failed", method="passkey", success=False, detail="no_challenge")
+		frappe.throw(_("Sign-in challenge expired"), frappe.AuthenticationError)
+
+	passkey = verify_assertion(credential, challenge, settings)
 
 	if not frappe.db.get_value("User", passkey.user, "enabled"):
 		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
@@ -307,6 +321,9 @@ def revoke_passkey(name: str):
 	# Ownership is checked above; the doctype grants no role to end users (C-1).
 	doc.delete(ignore_permissions=True)
 	log_event("passkey_revoked", user=user, method="passkey", success=True, detail=name)
+	notify.sign_in_methods_changed(
+		user, _('The passkey named "{0}" was removed from your account.').format(doc.friendly_name or name)
+	)
 	return {"ok": True}
 
 

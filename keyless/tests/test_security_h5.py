@@ -54,6 +54,9 @@ class OriginCase(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		reset_rate_limits()
+		# These tests cover origins and RP ID, not step-up (M-3).
+		patch.object(passkey.stepup, "require").start()
+		self.addCleanup(patch.stopall)
 		self.addCleanup(frappe.db.rollback)
 
 	def request(self, origin: str, host: str | None = None, path="/api/method/keyless.api.passkey.x"):

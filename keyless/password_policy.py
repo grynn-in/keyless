@@ -64,20 +64,26 @@ def password_blocked(user: str | None, settings, *, frappe_2fa_runs: bool = True
 EMAIL_FACTORS = ("email_otp", "magic_link")
 
 
-def enforce_factor(user: str, method: str) -> None:
-	"""Raise AuthenticationError if `user` may not sign in with Keyless factor `method`."""
-	if method not in EMAIL_FACTORS or not is_enabled():
-		return
+def email_factor_refusal(user: str) -> str | None:
+	"""Why `user` may not use email factors (a short reason), or None if they may."""
 	from frappe.twofactor import two_factor_is_enabled
 
 	if (
 		get_settings().require_passkey_for_system_users
 		and frappe.db.get_value("User", user, "user_type") == "System User"
 	):
-		reason = "passkey_required"
-	elif two_factor_is_enabled(user=user):
-		reason = "frappe_2fa"
-	else:
+		return "passkey_required"
+	if two_factor_is_enabled(user=user):
+		return "frappe_2fa"
+	return None
+
+
+def enforce_factor(user: str, method: str) -> None:
+	"""Raise AuthenticationError if `user` may not sign in with Keyless factor `method`."""
+	if method not in EMAIL_FACTORS or not is_enabled():
+		return
+	reason = email_factor_refusal(user)
+	if not reason:
 		return
 	log_event("factor_blocked", user=user, method=method, success=False, detail=reason)
 	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
