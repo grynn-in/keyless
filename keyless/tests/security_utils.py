@@ -103,5 +103,7 @@ def _set_settings(values: dict) -> None:
 
 
 def reset_rate_limits() -> None:
-	"""Clear Frappe's @rate_limit counters so tests do not trip each other's limits."""
-	frappe.cache.delete_keys("rl:")
+	"""Clear Frappe's @rate_limit counters and Keyless's own per-account counters and
+	codes, so tests do not trip each other's limits."""
+	for prefix in ("rl:", "keyless:rl:", "keyless:otp"):
+		frappe.cache.delete_keys(prefix)

@@ -26,6 +26,7 @@ class KeylessSettings(Document):
 		hide_user_enumeration: DF.Check
 		magic_link_expiry_minutes: DF.Int
 		max_otp_attempts: DF.Int
+		otp_daily_limit: DF.Int
 		otp_expiry_seconds: DF.Int
 		otp_length: DF.Int
 		passkey_user_verification: DF.Literal["required", "preferred", "discouraged"]

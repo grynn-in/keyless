@@ -20,6 +20,8 @@ OTP_CACHE_PREFIX = "keyless:otp:"
 MAGIC_CACHE_PREFIX = "keyless:magic:"
 CHALLENGE_CACHE_PREFIX = "keyless:challenge:"
 LOCK_CACHE_PREFIX = "keyless:lock:"
+ATTEMPTS_CACHE_PREFIX = "keyless:otp-attempts:"
+RATE_CACHE_PREFIX = "keyless:rl:"
 
 
 def _pepper() -> str:
@@ -60,33 +62,58 @@ def cache_delete(prefix: str, key: str) -> None:
 	frappe.cache.delete_value(f"{prefix}{key}")
 
 
+def _raw_key(name: str) -> bytes:
+	return frappe.cache.make_key(name)
+
+
 def store_otp(email: str, otp: str, expires_in_sec: int) -> None:
-	cache_set(
-		OTP_CACHE_PREFIX,
-		email,
-		{
-			"digest": digest(otp),
-			"attempts": 0,
-			"created": str(now_datetime()),
-		},
-		expires_in_sec,
-	)
+	cache_set(OTP_CACHE_PREFIX, email, {"digest": digest(otp), "created": str(now_datetime())}, expires_in_sec)
+	# Attempts live in their own counter so they can be incremented atomically
+	# (INCR) without rewriting the code, whose TTL must not change (audit M-1).
+	frappe.cache.setex(_raw_key(ATTEMPTS_CACHE_PREFIX + email), expires_in_sec, 0)
 
 
 def verify_and_consume_otp(email: str, otp: str, max_attempts: int = 5) -> bool:
-	payload = cache_get(OTP_CACHE_PREFIX, email)
-	if not payload:
+	if not cache_get(OTP_CACHE_PREFIX, email):
 		return False
-	attempts = cint(payload.get("attempts")) + 1
-	payload["attempts"] = attempts
+	attempts_key = _raw_key(ATTEMPTS_CACHE_PREFIX + email)
+	attempts = frappe.cache.incrby(attempts_key, 1)
+	if attempts == 1 and frappe.cache.ttl(attempts_key) < 0:
+		# Counter vanished (e.g. evicted) while the code lives: expire it with the code.
+		frappe.cache.expire(attempts_key, max(1, frappe.cache.ttl(_raw_key(OTP_CACHE_PREFIX + email))))
 	if attempts > max_attempts:
+		# Delete the code but keep the counter, so requests already past the check
+		# above keep counting instead of starting a fresh counter.
+		frappe.cache.delete(_raw_key(OTP_CACHE_PREFIX + email))
 		cache_delete(OTP_CACHE_PREFIX, email)
 		return False
-	if not compare(otp.strip(), payload.get("digest") or ""):
-		cache_set(OTP_CACHE_PREFIX, email, payload, expires_in_sec=300)
+	if not compare(otp.strip(), (cache_get(OTP_CACHE_PREFIX, email) or {}).get("digest") or ""):
 		return False
+	# Only the request that actually deletes the code wins, so one code gives one session.
+	return _delete_otp(email)
+
+
+def _delete_otp(email: str) -> bool:
+	deleted = frappe.cache.delete(_raw_key(OTP_CACHE_PREFIX + email))
+	frappe.cache.delete(_raw_key(ATTEMPTS_CACHE_PREFIX + email))
 	cache_delete(OTP_CACHE_PREFIX, email)
-	return True
+	return bool(deleted)
+
+
+def count_hit(bucket: str, identity: str, window_sec: int) -> int:
+	"""Atomically count one event for `identity` in a fixed window; return the count.
+
+	Identities (e.g. email addresses) are stored as digests, never in clear.
+	"""
+	key = _raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")
+	count = frappe.cache.incrby(key, 1)
+	if count == 1:
+		frappe.cache.expire(key, window_sec)
+	return count
+
+
+def hit_count(bucket: str, identity: str) -> int:
+	return cint(frappe.cache.get(_raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")))
 
 
 def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str | None = None) -> None:

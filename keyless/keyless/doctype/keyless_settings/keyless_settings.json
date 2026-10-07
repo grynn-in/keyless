@@ -21,6 +21,7 @@
     "otp_length",
     "otp_expiry_seconds",
     "max_otp_attempts",
+    "otp_daily_limit",
     "column_break_otp",
     "magic_link_expiry_minutes",
     "rate_limit_per_hour",
@@ -125,7 +126,15 @@
       "default": "5",
       "fieldname": "max_otp_attempts",
       "fieldtype": "Int",
-      "label": "Max OTP Attempts"
+      "label": "Max OTP Attempts",
+      "description": "Wrong guesses allowed per code. Each account may also make at most twice this many wrong guesses per hour, across all codes."
+    },
+    {
+      "default": "10",
+      "description": "Sign-in codes an account can request per day.",
+      "fieldname": "otp_daily_limit",
+      "fieldtype": "Int",
+      "label": "Daily Code Limit per Account"
     },
     {
       "fieldname": "column_break_otp",
@@ -141,7 +150,8 @@
       "default": "5",
       "fieldname": "rate_limit_per_hour",
       "fieldtype": "Int",
-      "label": "Rate Limit per Hour"
+      "label": "Rate Limit per Hour",
+      "description": "Sign-in codes an account can request per hour, whatever the client IP."
     },
     {
       "default": "90",

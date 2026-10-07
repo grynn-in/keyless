@@ -13,7 +13,12 @@ from keyless.api.common import (
 )
 from keyless.audit import log_event
 from keyless.auth import issue_session
-from keyless.tokens import random_otp, store_otp, verify_and_consume_otp
+from keyless.tokens import count_hit, hit_count, random_otp, store_otp, verify_and_consume_otp
+
+HOUR = 60 * 60
+DAY = 24 * HOUR
+# An account may make this many times max_otp_attempts wrong guesses per hour.
+ACCOUNT_GUESS_FACTOR = 2
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -27,6 +32,14 @@ def request_otp(email: str):
 	email = normalize_email(email)
 	if not email or "@" not in email:
 		frappe.throw(_("Enter a valid email address"))
+
+	# Per-account limits, independent of the client IP (which a client can spoof
+	# via X-Forwarded-For behind a misconfigured proxy). Unknown addresses are
+	# counted the same way, so the limits reveal nothing (audit M-1).
+	if count_hit("otp-request-hour", email, HOUR) > int(settings.rate_limit_per_hour or 5):
+		_too_many()
+	if count_hit("otp-request-day", email, DAY) > int(settings.otp_daily_limit or 10):
+		_too_many()
 
 	user = pretend_success_if_unknown(email)
 	expires = int(settings.otp_expiry_seconds or 300)
@@ -54,13 +67,23 @@ def verify_otp(email: str, otp: str):
 		frappe.throw(_("Email OTP is disabled"))
 
 	email = normalize_email(email)
+	max_attempts = int(settings.max_otp_attempts or 5)
+	# Wrong guesses per account per hour, across every code issued in that hour,
+	# so requesting a new code does not buy more guesses (audit M-1).
+	if hit_count("otp-fail-hour", email) >= max_attempts * ACCOUNT_GUESS_FACTOR:
+		_too_many()
 	user = pretend_success_if_unknown(email)
-	if not user or not verify_and_consume_otp(email, otp or "", int(settings.max_otp_attempts or 5)):
+	if not user or not verify_and_consume_otp(email, otp or "", max_attempts):
+		count_hit("otp-fail-hour", email, HOUR)
 		log_event("otp_failed", user=email, method="email_otp", success=False)
 		frappe.throw(_("Invalid or expired code"), frappe.AuthenticationError)
 
 	issue_session(user, method="email_otp")
 	return {"ok": True, "user": user, "home": _home_for(user)}
+
+
+def _too_many():
+	frappe.throw(_("Too many attempts. Try again later."), frappe.RateLimitExceededError)
 
 
 def _send_otp_mail(email: str, otp: str, expires: int):

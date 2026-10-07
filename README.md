@@ -47,6 +47,17 @@ For what happens in each situation (which logins are blocked, what users see, wh
 
 Do not fork `frappe/auth.py`. Do not store OTPs in MariaDB. Do not use SMS OTP (SIM swap). Do not make Administrator passwordless-only without an out-of-band recovery story.
 
+## Reverse proxy
+
+Frappe takes the client IP from the first `X-Forwarded-For` value. Configure the reverse
+proxy in front of Frappe to **overwrite** that header with the real client address
+(nginx: `proxy_set_header X-Forwarded-For $remote_addr;`), never to append to a value
+the client sent. Otherwise clients can choose their own IP, which defeats every per-IP
+limit and pollutes the audit log. Keyless's per-account limits on sign-in codes do not
+depend on the IP, but its per-IP limits and Frappe's do.
+
+Magic-link keys travel in the query string, so also keep `key=` out of proxy access logs.
+
 ## Multi-site benches
 
 WebAuthn **RP ID** is the hostname of the site. Leave `rp_id` blank to use the current host. A passkey registered on `erp.company.ch` will not work on `staging.company.ch`. That is the spec, not a bug.
