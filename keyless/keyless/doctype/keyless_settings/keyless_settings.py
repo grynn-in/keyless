@@ -15,6 +15,7 @@ class KeylessSettings(Document):
 		from frappe.types import DF
 
 		allow_administrator_password: DF.Check
+		allowed_origins: DF.SmallText | None
 		audit_retention_days: DF.Int
 		disable_password_login: DF.Check
 		enable_backup_codes: DF.Check
@@ -49,12 +50,27 @@ class KeylessSettings(Document):
 			if ":" in host:
 				frappe.throw(_("RP ID must be a hostname without port"))
 			self.rp_id = host
+		if self.allowed_origins:
+			self.allowed_origins = "\n".join(self._clean_origins(self.allowed_origins))
 		if self.disable_password_login and not (
 			self.enable_passkeys or self.enable_magic_link or self.enable_email_otp
 		):
 			frappe.throw(_("Enable at least one passwordless factor before disabling passwords"))
 		if self.replace_standard_login:
 			self._sync_login_redirect()
+
+	@staticmethod
+	def _clean_origins(value: str) -> list[str]:
+		origins = []
+		for line in value.splitlines():
+			line = line.strip().rstrip("/")
+			if not line:
+				continue
+			parts = urlparse(line)
+			if parts.scheme not in ("http", "https") or not parts.hostname or parts.path or parts.query:
+				frappe.throw(_("Allowed origin must look like https://host[:port]: {0}").format(line))
+			origins.append(f"{parts.scheme}://{parts.netloc.lower()}")
+		return origins
 
 	def on_update(self):
 		frappe.cache.delete_value("keyless:settings")

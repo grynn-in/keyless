@@ -28,6 +28,7 @@
     "section_webauthn",
     "rp_name",
     "rp_id",
+    "allowed_origins",
     "column_break_webauthn",
     "passkey_user_verification",
     "require_passkey_for_system_users"
@@ -160,10 +161,16 @@
       "label": "RP Name"
     },
     {
-      "description": "Must match the site hostname (no scheme, no port). Leave blank to use the current host.",
+      "description": "Must match the site hostname (no scheme, no port). Leave blank to use the configured site host (host_name in site_config, else the site name). Never taken from the request.",
       "fieldname": "rp_id",
       "fieldtype": "Data",
       "label": "RP ID"
+    },
+    {
+      "description": "Extra origins passkeys may be used from, one per line, e.g. https://erp.example.com:8001. The configured site URL is always allowed. Each origin's host must be the RP ID or a subdomain of it.",
+      "fieldname": "allowed_origins",
+      "fieldtype": "Small Text",
+      "label": "Allowed Origins"
     },
     {
       "fieldname": "column_break_webauthn",

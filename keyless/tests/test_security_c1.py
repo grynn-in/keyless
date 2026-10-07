@@ -205,7 +205,7 @@ class TestAssertionUserHandle(FrappeTestCase):
 				"consume_challenge",
 				return_value={"type": "authentication", "user": None, "challenge": "Y2hhbGxlbmdl"},
 			),
-			patch.object(passkey, "client_origin", return_value="http://localhost"),
+			patch.object(passkey, "allowed_origins", return_value=["http://localhost"]),
 			patch.object(passkey, "rp_id", return_value="localhost"),
 			patch.object(passkey, "log_event"),
 			patch(

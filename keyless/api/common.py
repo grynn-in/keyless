@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 import frappe
 from frappe import _
@@ -37,27 +37,32 @@ def constant_time_delay():
 	time.sleep(0.15)
 
 
-def client_origin() -> str:
-	"""Origin the authenticator signed. Prefer the browser Origin header.
+def site_origin() -> str:
+	"""Origin of the configured site URL (site_config host_name, else the site name).
 
-	`frappe.utils.get_url()` follows site_config host_name and is often wrong
-	on a local bench (port 8000 vs 8001, http vs https).
+	Never derived from request headers, which the client controls (audit H-5).
 	"""
-	origin = (frappe.get_request_header("Origin") or "").strip().rstrip("/")
-	if origin and origin.lower() != "null":
-		return origin
-	request = getattr(frappe.local, "request", None)
-	if request is not None and request.host:
-		scheme = request.scheme or "http"
-		return f"{scheme}://{request.host}".rstrip("/")
-	return frappe.utils.get_url().rstrip("/")
+	parts = urlsplit(frappe.utils.get_url(allow_header_override=False))
+	return f"{parts.scheme}://{parts.netloc}"
+
+
+def allowed_origins() -> list[str]:
+	"""Origins a passkey ceremony may come from: the site origin plus the
+	Allowed Origins setting (for example a bench port or an extra domain)."""
+	origins = [site_origin()]
+	for line in (get_settings().allowed_origins or "").splitlines():
+		origin = line.strip().rstrip("/")
+		if origin and origin not in origins:
+			origins.append(origin)
+	return origins
 
 
 def rp_id() -> str:
+	"""The configured RP ID, else the configured site's hostname. Never a request header."""
 	settings = get_settings()
 	if settings.rp_id:
 		return settings.rp_id
-	return urlparse(client_origin()).hostname or "localhost"
+	return urlsplit(site_origin()).hostname or "localhost"
 
 
 def rp_name() -> str:

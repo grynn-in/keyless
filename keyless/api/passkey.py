@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import client_origin, get_rate_limit, rp_id, rp_name, require_enabled
+from keyless.api.common import allowed_origins, get_rate_limit, require_enabled, rp_id, rp_name
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import consume_challenge, random_token, store_challenge
@@ -158,7 +158,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 		verification = verify_registration_response(
 			credential=cred,
 			expected_challenge=_challenge_bytes(challenge["challenge"]),
-			expected_origin=client_origin(),
+			expected_origin=allowed_origins(),
 			expected_rp_id=rp_id(),
 			require_user_verification=settings.passkey_user_verification == "required",
 		)
@@ -276,7 +276,7 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		verification = verify_authentication_response(
 			credential=cred,
 			expected_challenge=_challenge_bytes(challenge["challenge"]),
-			expected_origin=client_origin(),
+			expected_origin=allowed_origins(),
 			expected_rp_id=rp_id(),
 			credential_public_key=base64url_to_bytes(passkey.public_key),
 			credential_current_sign_count=int(passkey.sign_count or 0),
