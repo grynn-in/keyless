@@ -7,6 +7,7 @@ first. Credential public keys live on User Passkey; challenges live in Redis.
 
 from __future__ import annotations
 
+import hmac
 import json
 
 import frappe
@@ -30,6 +31,32 @@ def _uv_requirement(settings):
 		"discouraged": UserVerificationRequirement.DISCOURAGED,
 	}
 	return mapping.get(value, UserVerificationRequirement.REQUIRED)
+
+
+def _handle_bytes(handle: str) -> bytes:
+	"""The WebAuthn user.id we registered for a stored keyless_user_handle."""
+	return bytes.fromhex(handle) if len(handle) == 32 else handle.encode("utf-8")
+
+
+def _user_handle_matches(cred: dict, passkey) -> bool:
+	"""The assertion's userHandle must be the registered handle of passkey.user.
+
+	Passkeys are created as resident keys, so authenticators always return
+	userHandle; a missing one is treated as a mismatch.
+	"""
+	from webauthn.helpers import base64url_to_bytes
+
+	expected = frappe.db.get_value("User", passkey.user, "keyless_user_handle")
+	if not expected or (passkey.user_handle and passkey.user_handle != expected):
+		return False
+	asserted = ((cred.get("response") or {}).get("userHandle") or "").strip()
+	if not asserted:
+		return False
+	try:
+		asserted_bytes = base64url_to_bytes(asserted)
+	except Exception:
+		return False
+	return hmac.compare_digest(asserted_bytes, _handle_bytes(expected))
 
 
 def _challenge_bytes(stored) -> bytes:
@@ -99,7 +126,7 @@ def registration_options():
 		rp_id=rp_id(),
 		rp_name=rp_name(),
 		user_name=user,
-		user_id=bytes.fromhex(handle) if len(handle) == 32 else handle.encode("utf-8"),
+		user_id=_handle_bytes(handle),
 		user_display_name=full_name,
 		attestation=AttestationConveyancePreference.NONE,
 		authenticator_selection=AuthenticatorSelectionCriteria(
@@ -231,7 +258,7 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 	passkey = frappe.db.get_value(
 		"User Passkey",
 		{"credential_id": raw_id},
-		["name", "user", "public_key", "sign_count"],
+		["name", "user", "public_key", "sign_count", "user_handle"],
 		as_dict=True,
 	)
 	if not passkey:
@@ -239,6 +266,10 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		frappe.throw(_("Unknown passkey"), frappe.AuthenticationError)
 
 	if challenge.get("user") and challenge["user"] != passkey.user:
+		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
+
+	if not _user_handle_matches(cred, passkey):
+		log_event("passkey_failed", method="passkey", success=False, detail="user_handle_mismatch")
 		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
 
 	try:
@@ -276,7 +307,7 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 @frappe.whitelist()
 def list_passkeys():
 	if frappe.session.user == "Guest":
-		frappe.throw(frappe.PermissionError)
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	return frappe.get_all(
 		"User Passkey",
 		filters={"user": frappe.session.user},
@@ -289,9 +320,10 @@ def list_passkeys():
 def revoke_passkey(name: str):
 	doc = frappe.get_doc("User Passkey", name)
 	if doc.user != frappe.session.user and "System Manager" not in frappe.get_roles():
-		frappe.throw(frappe.PermissionError)
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	user = doc.user
-	doc.delete()
+	# Ownership is checked above; the doctype grants no role to end users (C-1).
+	doc.delete(ignore_permissions=True)
 	log_event("passkey_revoked", user=user, method="passkey", success=True, detail=name)
 	return {"ok": True}
 
