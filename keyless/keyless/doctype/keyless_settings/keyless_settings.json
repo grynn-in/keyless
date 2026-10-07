@@ -188,7 +188,7 @@
       "fieldname": "require_passkey_for_system_users",
       "fieldtype": "Check",
       "label": "Require a Passkey for System Users",
-      "description": "System Users cannot sign in with a password, email code or magic link. Passkeys and backup codes still work. Administrator break-glass is unaffected."
+      "description": "System Users cannot sign in with an email code or magic link, or with a password unless Frappe two-factor authentication applies to them. Passkeys and backup codes still work. Administrator break-glass is unaffected."
     }
   ],
   "issingle": 1,

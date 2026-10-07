@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import frappe
+import frappe.twofactor
 from frappe.auth import CookieManager
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import set_request
@@ -278,3 +279,110 @@ class TestNoDeadSettings(FrappeTestCase):
 	def test_no_reads_of_missing_settings(self):
 		app = Path(frappe.get_app_path("keyless"))
 		self.assertNotIn("deny_password_sessions", (app / "auth.py").read_text())
+
+
+TFA_USER = "kl-h4-2fa@example.com"
+TFA_ROLE = "Keyless H4 2FA Role"
+
+
+def _wait_for_fresh_totp_window(margin: int = 5) -> None:
+	"""Frappe verifies TOTP codes with no tolerance window, so a code made in the last
+	seconds of a 30 s step can expire before the request lands. Start a new step."""
+	import time
+
+	remaining = 30 - (time.time() % 30)
+	if remaining < margin:
+		time.sleep(remaining + 0.1)
+
+
+class TestSystemUserPasswordWithFrappe2FA(FrappeTestCase):
+	"""D9-C: with passkeys required for System Users, a System User may still use a
+	password if Frappe 2FA applies to them, because Frappe then asks for the second
+	factor. The OAuth password grant skips 2FA, so it stays refused."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		if not frappe.db.exists("Role", TFA_ROLE):
+			frappe.get_doc({"doctype": "Role", "role_name": TFA_ROLE, "two_factor_auth": 1}).insert()
+		make_user(TFA_USER, user_type="System User", roles=(TFA_ROLE,))
+		# Authenticator app already set up, so Frappe does not email a setup QR code.
+		frappe.twofactor.set_default(TFA_USER + "_otplogin", 1)
+		frappe.db.commit()
+		cls.saved_system = {
+			key: frappe.db.get_single_value("System Settings", key)
+			for key in ("enable_two_factor_auth", "two_factor_method")
+		}
+		_system_settings(enable_two_factor_auth=1, two_factor_method="OTP App")
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.set_user("Administrator")
+		_system_settings(**cls.saved_system)
+		frappe.twofactor.clear_default(TFA_USER + "_otplogin")
+		frappe.twofactor.clear_default(TFA_USER + "_otpsecret")
+		delete_user(TFA_USER)
+		frappe.delete_doc("Role", TFA_ROLE, force=True, ignore_permissions=True)
+		frappe.db.commit()
+		super().tearDownClass()
+
+	def test_password_goes_to_frappe_2fa_and_then_signs_in(self):
+		import pyotp
+
+		with keyless_settings(**REQUIRE_PASSKEY):
+			client = new_client()
+			first = api_login(client, TFA_USER, PASSWORD)
+			body = first.json or {}
+			self.assertEqual(first.status_code, 200, first.get_data(as_text=True)[:300])
+			self.assertIn("tmp_id", body, "Frappe should ask for the second factor")
+			self.assertEqual(logged_in_user(client), "Guest", "no session before the second factor")
+
+			secret = frappe.safe_decode(frappe.cache.get(body["tmp_id"] + "_otp_secret"))
+			_wait_for_fresh_totp_window()
+			http(
+				client,
+				"post",
+				"/api/method/login",
+				data={"tmp_id": body["tmp_id"], "otp": pyotp.TOTP(secret).now()},
+			)
+			self.assertEqual(logged_in_user(client), TFA_USER)
+
+	def test_wrong_second_factor_gives_no_session(self):
+		with keyless_settings(**REQUIRE_PASSKEY):
+			client = new_client()
+			body = api_login(client, TFA_USER, PASSWORD).json or {}
+			http(client, "post", "/api/method/login", data={"tmp_id": body.get("tmp_id"), "otp": "000000"})
+			self.assertEqual(logged_in_user(client), "Guest")
+
+	def test_oauth_password_grant_still_refused(self):
+		oauth = frappe.get_doc(
+			{
+				"doctype": "OAuth Client",
+				"app_name": "kl-h4-2fa-oauth",
+				"scopes": "all openid",
+				"default_redirect_uri": "http://localhost/cb",
+				"redirect_uris": "http://localhost/cb",
+				"skip_authorization": 1,
+			}
+		).insert(ignore_permissions=True)
+		frappe.db.commit()
+		try:
+			with keyless_settings(**REQUIRE_PASSKEY):
+				response = http(
+					new_client(),
+					"post",
+					"/api/method/frappe.integrations.oauth2.get_token",
+					data={
+						"grant_type": "password",
+						"username": TFA_USER,
+						"password": PASSWORD,
+						"client_id": oauth.name,
+						"scope": "all",
+					},
+				)
+			self.assertNotIn("access_token", response.get_data(as_text=True))
+		finally:
+			frappe.db.delete("OAuth Bearer Token", {"client": oauth.name})
+			frappe.delete_doc("OAuth Client", oauth.name, force=True, ignore_permissions=True)
+			frappe.db.commit()

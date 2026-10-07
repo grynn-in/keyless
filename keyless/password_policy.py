@@ -35,8 +35,12 @@ def resolve_login_name(login_name: str | None) -> str | None:
 	return found["name"] if found else None
 
 
-def password_blocked(user: str | None, settings) -> bool:
-	"""`user` is a resolved User name, or None when the login name matches nobody."""
+def password_blocked(user: str | None, settings, *, frappe_2fa_runs: bool = True) -> bool:
+	"""`user` is a resolved User name, or None when the login name matches nobody.
+
+	`frappe_2fa_runs` is False on paths that check the password without Frappe's
+	2FA step, such as the OAuth2 password grant.
+	"""
 	if user == "Administrator" and settings.allow_administrator_password:
 		return False
 	if settings.disable_password_login:
@@ -47,7 +51,10 @@ def password_blocked(user: str | None, settings) -> bool:
 	if flags.get("keyless_passwordless_only"):
 		return True
 	if settings.require_passkey_for_system_users and flags.get("user_type") == "System User":
-		return True
+		# D9: a password is still allowed when Frappe 2FA will ask for a second factor.
+		from frappe.twofactor import two_factor_is_enabled
+
+		return not (frappe_2fa_runs and two_factor_is_enabled(user=user))
 	return False
 
 
@@ -99,7 +106,7 @@ def enforce(*, login_name: str | None = None, user: str | None = None, method: s
 		return
 	if user is None:
 		user = resolve_login_name(login_name)
-	if not password_blocked(user, get_settings()):
+	if not password_blocked(user, get_settings(), frappe_2fa_runs=method == "password"):
 		return
 	log_event(
 		"password_blocked",

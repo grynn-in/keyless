@@ -47,7 +47,8 @@ Rules are checked in this order; the first that matches wins.
 | 3 | **Disable Password Login** is on | Blocked, for every login name, including unknown names and Administrator without break-glass. |
 | 4 | The login name matches no user | Not handled by Keyless. Frappe answers *"Invalid login credentials"*. |
 | 5 | The user has **Passwordless Only** ticked (User form, Keyless section) | Blocked. |
-| 6 | **Require a Passkey for System Users** is on and the user is a System User | Blocked. |
+| 6 | **Require a Passkey for System Users** is on, the user is a System User, and Frappe 2FA does **not** apply to them | Blocked. |
+| 6a | Same, but Frappe 2FA **does** apply to them | Allowed. Frappe then asks for the second factor (authenticator code, SMS or email) before creating the session. |
 | 7 | None of the above | Allowed. Frappe checks the password, 2FA, IP and login-hour restrictions as usual. |
 
 ### What the person signing in sees
@@ -83,6 +84,7 @@ Frappe's OAuth2 provider lets a client exchange a username and password for a to
 | If… | Then… |
 |---|---|
 | Rules 2–6 above would block a password login for that username | The token request is refused with HTTP 401 and **no token is issued**. |
+| **Require a Passkey for System Users** is on and the username is a System User, even one with Frappe 2FA | Refused. Rule 6a does not apply here, because the password grant never runs Frappe's 2FA step. |
 | Otherwise | The grant works as before. |
 
 This applies on `/api/method/…`, `/api/v1/method/…`, `/api/v2/method/…` and the legacy
@@ -228,7 +230,7 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Change | What to do |
 |---|---|
 | Users can no longer create or edit User Passkey records through `/api/resource` | Nothing, unless a custom integration relied on it. Use the Keyless API instead. |
-| Disable Password Login, Passwordless Only and Require a Passkey for System Users are now **actually enforced** | Before upgrading, check who would be locked out. In particular, Require a Passkey for System Users now blocks System User passwords. |
+| Disable Password Login, Passwordless Only and Require a Passkey for System Users are now **actually enforced** | Before upgrading, check who would be locked out. In particular, Require a Passkey for System Users now blocks the passwords of System Users who do not have Frappe 2FA. |
 | OAuth clients using the password grant stop working when password login is disabled for that user | Move them to the authorization-code grant or API keys. |
 | The **Allow Passwordless Signup** setting is removed | Nothing. It was never enforced; Keyless has no signup flow. |
 | The `login` method override (`keyless.overrides.login`) is removed | Nothing, unless other code imported it. The policy now runs from the `before_login`, `on_login` and `before_request` hooks. |
@@ -236,3 +238,22 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Users with Frappe 2FA can no longer sign in with email OTP or magic links | Make sure they have a passkey (or backup codes) before upgrading, or they will need a password plus Frappe 2FA. |
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |
 | Login-page and magic-link targets must be same-site paths | Nothing for normal use. Links or integrations that pass full URLs as `redirect-to` now land on the default page. |
+
+---
+
+## 9. Decisions behind this behaviour
+
+Maintainer decisions taken during the 2026-10 security remediation.
+
+| # | Topic | Decision |
+|---|---|---|
+| D1 | Frappe's own *Disable Username/Password Login* | Keyless does not set it, because it would also remove the Administrator break-glass. |
+| D2 | Fresh-install defaults | Keyless and every factor are off until an administrator opts in. |
+| D3 | Users Frappe 2FA applies to | Email OTP and magic link are refused. |
+| D4 | OAuth2 password grant when passwords are disabled | Blocked. |
+| D5 | Factors refused for System Users when passkeys are required | Email OTP and magic link. Backup codes stay as recovery. |
+| D6 | Passkey sign-in options for an email address | Pending (Phase 3, M-2): discoverable credentials only; the `email` parameter is dropped. |
+| D7 | Recent re-authentication before adding a passkey or rotating backup codes | Pending (Phase 3, M-3): a setting, default 5 minutes. |
+| D8 | Magic-link hardening | Pending (Phase 3, M-4): GET shows a confirmation page and only the POST signs in. Binding the link to the requesting browser is a later follow-up. |
+| D9 | Passwords for System Users when passkeys are required | Allowed only when Frappe 2FA applies to the user. Never through the OAuth2 password grant, which skips 2FA. |
+| D10 | Backup codes for users with Frappe 2FA | Allowed, as the recovery path. |
