@@ -54,7 +54,6 @@ doc_events = {
 }
 
 scheduler_events = {
-	"hourly": ["keyless.tasks.purge_expired_challenges"],
 	"daily": ["keyless.tasks.purge_old_audit_logs"],
 }
 

@@ -268,6 +268,11 @@ def verify_assertion(credential: str | dict, challenge: dict, settings):
 		# The library's text stays in the audit log only (audit L-3).
 		frappe.throw(_("Could not verify this passkey."), frappe.AuthenticationError)
 
+	# Refuse disabled users before recording anything about the assertion (audit I-1).
+	if not frappe.db.get_value("User", passkey.user, "enabled"):
+		log_event("passkey_failed", user=passkey.user, method="passkey", success=False, detail="user_disabled")
+		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
+
 	frappe.db.set_value(
 		"User Passkey",
 		passkey.name,
@@ -293,10 +298,6 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		frappe.throw(_("Sign-in challenge expired"), frappe.AuthenticationError)
 
 	passkey = verify_assertion(credential, challenge, settings)
-
-	if not frappe.db.get_value("User", passkey.user, "enabled"):
-		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
-
 	issue_session(passkey.user, method="passkey")
 	home = "/app" if frappe.db.get_value("User", passkey.user, "user_type") == "System User" else "/"
 	return {"ok": True, "user": passkey.user, "home": home}

@@ -13,6 +13,7 @@ import secrets
 from typing import Any
 
 import frappe
+from frappe import _
 from frappe.utils import cint, now_datetime
 
 
@@ -25,7 +26,16 @@ RATE_CACHE_PREFIX = "keyless:rl:"
 
 
 def _pepper() -> str:
-	return str(frappe.local.conf.get("encryption_key") or frappe.local.conf.get("secret_key") or "")
+	"""The site's encryption_key. Fail closed without it: hashing codes with an empty
+	or guessable pepper would make stored digests easy to reverse (audit I-1).
+	Rotating encryption_key invalidates every stored backup code."""
+	key = frappe.local.conf.get("encryption_key")
+	if not key:
+		frappe.throw(
+			_("Keyless needs encryption_key in site_config.json before it can issue or check codes."),
+			title=_("Keyless is not configured"),
+		)
+	return str(key)
 
 
 def digest(value: str) -> str:

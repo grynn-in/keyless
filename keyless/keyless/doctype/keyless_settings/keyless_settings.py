@@ -63,8 +63,6 @@ class KeylessSettings(Document):
 			self.enable_passkeys or self.enable_magic_link or self.enable_email_otp
 		):
 			frappe.throw(_("Enable at least one passwordless factor before disabling passwords"))
-		if self.replace_standard_login:
-			self._sync_login_redirect()
 
 	@staticmethod
 	def _clean_origins(value: str) -> list[str]:
@@ -82,11 +80,3 @@ class KeylessSettings(Document):
 	def on_update(self):
 		frappe.cache.delete_value("keyless:settings")
 		frappe.clear_cache()
-
-	def _sync_login_redirect(self):
-		"""Keep a Website Route Redirect so /login lands on the Keyless page."""
-		exists = frappe.db.exists("Website Route Redirect", {"source": "/login"})
-		if exists:
-			return
-		# Website Route Redirect is optional; login.js also hard-redirects when boot says so.
-		return
