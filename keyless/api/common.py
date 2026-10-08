@@ -15,11 +15,45 @@ def require_enabled():
 	return get_settings()
 
 
+HOUR = 60 * 60
+DAY = 24 * HOUR
+
+# Per-IP limits only stop floods from one address. A whole office can share one IP
+# behind NAT, so they sit well above what one person needs; the per-account limits
+# below are what protect individual accounts (audit L-2).
+IP_LIMIT_FACTOR = 20  # email and code endpoints: 100 per hour by default
+PASSKEY_IP_LIMIT_FACTOR = 200  # passkey endpoints: every attempt needs a valid signature
+
+
 def get_rate_limit() -> int:
+	"""Rate Limit per Hour: requests per account per hour."""
 	try:
 		return int(get_settings().rate_limit_per_hour or 5)
 	except Exception:
 		return 5
+
+
+def get_ip_rate_limit() -> int:
+	return get_rate_limit() * IP_LIMIT_FACTOR
+
+
+def get_passkey_ip_rate_limit() -> int:
+	return get_rate_limit() * PASSKEY_IP_LIMIT_FACTOR
+
+
+def too_many():
+	frappe.throw(_("Too many attempts. Try again later."), frappe.RateLimitExceededError)
+
+
+def limit_mail_requests(email: str, settings, kind: str) -> None:
+	"""Per-account limits on codes or links mailed to `email`, whatever the client IP.
+	Unknown addresses are counted the same way, so the limits reveal nothing (M-1)."""
+	from keyless.tokens import count_hit
+
+	if count_hit(f"{kind}-request-hour", email, HOUR) > int(settings.rate_limit_per_hour or 5):
+		too_many()
+	if count_hit(f"{kind}-request-day", email, DAY) > int(settings.otp_daily_limit or 10):
+		too_many()
 
 
 def normalize_email(email: str) -> str:

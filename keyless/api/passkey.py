@@ -14,8 +14,8 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import allowed_origins, get_rate_limit, require_enabled, rp_id, rp_name
 from keyless import notify, stepup
+from keyless.api.common import allowed_origins, get_passkey_ip_rate_limit, require_enabled, rp_id, rp_name
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import consume_challenge, random_token, store_challenge
@@ -206,7 +206,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_passkey_ip_rate_limit, seconds=60 * 60)
 def authentication_options():
 	"""Start a passkey sign-in. Discoverable credentials only: the response never
 	depends on who is signing in, so it cannot reveal which accounts have passkeys
@@ -279,7 +279,7 @@ def verify_assertion(credential: str | dict, challenge: dict, settings):
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_passkey_ip_rate_limit, seconds=60 * 60)
 def verify_authentication(credential: str | dict, challenge_id: str):
 	settings = require_enabled()
 	if not settings.enable_passkeys:

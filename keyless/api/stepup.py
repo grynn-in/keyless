@@ -8,8 +8,8 @@ from frappe import _
 
 from keyless import stepup
 from keyless.api import passkey as passkey_api
-from keyless.api.common import require_enabled
-from keyless.api.otp import HOUR, _send_otp_mail, _too_many
+from keyless.api.common import HOUR, require_enabled, too_many
+from keyless.api.otp import _send_otp_mail
 from keyless.audit import log_event
 from keyless.password_policy import email_factor_refusal
 from keyless.tokens import count_hit, hit_count, random_otp, store_otp, verify_and_consume_otp
@@ -86,7 +86,7 @@ def request_email_code():
 	if "email" not in _methods(settings, user):
 		frappe.throw(_("Confirm with a passkey instead"), frappe.PermissionError)
 	if count_hit("stepup-email-hour", user, HOUR) > int(settings.rate_limit_per_hour or 5):
-		_too_many()
+		too_many()
 	expires = int(settings.otp_expiry_seconds or 300)
 	code = random_otp(int(settings.otp_length or 6))
 	store_otp(OTP_KEY_PREFIX + user, code, expires)
@@ -100,7 +100,7 @@ def verify_email_code(otp: str):
 	user = _user()
 	max_attempts = int(settings.max_otp_attempts or 5)
 	if hit_count("stepup-fail-hour", user) >= max_attempts * 2:
-		_too_many()
+		too_many()
 	if not verify_and_consume_otp(OTP_KEY_PREFIX + user, otp or "", max_attempts):
 		count_hit("stepup-fail-hour", user, HOUR)
 		log_event("step_up_failed", user=user, method="email_otp", success=False)

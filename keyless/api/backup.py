@@ -6,15 +6,16 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import get_rate_limit, normalize_email, require_enabled
 from keyless import notify, stepup
+from keyless.api.common import HOUR, get_ip_rate_limit, normalize_email, require_enabled, too_many
 from keyless.audit import log_event
 from keyless.auth import issue_session
-from keyless.tokens import compare, digest
+from keyless.tokens import compare, count_hit, digest, hit_count
 from keyless.user import resolve_enabled_user
 
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODES_PER_USER = 10
+BACKUP_FAILURES_PER_HOUR = 10
 # Compared against when there is no real code, so every redemption does the same work.
 _DUMMY_HASH = "0" * 64
 
@@ -54,13 +55,16 @@ def generate_codes():
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_ip_rate_limit, seconds=HOUR)
 def redeem(email: str, code: str):
 	settings = require_enabled()
 	if not settings.enable_backup_codes:
 		frappe.throw(_("Backup codes are disabled"))
 
 	email = normalize_email(email)
+	# Wrong recovery codes per account per hour, whatever the client IP (audit L-2).
+	if hit_count("backup-fail-hour", email) >= BACKUP_FAILURES_PER_HOUR:
+		too_many()
 	user = resolve_enabled_user(email)
 	# Same work whether the account exists, has codes left, or not: one query and
 	# exactly CODES_PER_USER hash checks, with no early exit (audit M-2).
@@ -77,6 +81,7 @@ def redeem(email: str, code: str):
 		if compare(normalized, expected) and i < len(rows) and match is None:
 			match = rows[i]
 	if not match:
+		count_hit("backup-fail-hour", email, HOUR)
 		log_event("backup_failed", user=user or "Guest", method="backup", success=False)
 		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)
 

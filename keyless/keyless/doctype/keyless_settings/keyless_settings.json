@@ -152,7 +152,7 @@
       "fieldname": "rate_limit_per_hour",
       "fieldtype": "Int",
       "label": "Rate Limit per Hour",
-      "description": "Sign-in codes an account can request per hour, whatever the client IP."
+      "description": "Sign-in codes or links an account can request per hour, whatever the client IP. Limits per client IP are 20 times this for email and recovery-code requests and 200 times for passkeys, so an office behind one IP is not locked out."
     },
     {
       "default": "90",

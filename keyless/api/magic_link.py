@@ -7,7 +7,8 @@ from frappe.utils import escape_html, get_url
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
-	get_rate_limit,
+	get_ip_rate_limit,
+	limit_mail_requests,
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
@@ -19,7 +20,7 @@ from keyless.tokens import consume_magic_link, peek_magic_link, random_token, st
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_ip_rate_limit, seconds=60 * 60)
 def send_link(email: str, redirect_to: str | None = None):
 	settings = require_enabled()
 	if not settings.enable_magic_link:
@@ -28,6 +29,8 @@ def send_link(email: str, redirect_to: str | None = None):
 	email = normalize_email(email)
 	if not email or "@" not in email:
 		frappe.throw(_("Enter a valid email address"))
+
+	limit_mail_requests(email, settings, "link")
 
 	user = pretend_success_if_unknown(email)
 	expiry_min = int(settings.magic_link_expiry_minutes or 10)
@@ -48,7 +51,7 @@ def send_link(email: str, redirect_to: str | None = None):
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_ip_rate_limit, seconds=60 * 60)
 def login_via_link(key: str, redirect_to: str | None = None):
 	"""GET (opening the emailed link) only shows a confirmation page; the POST from
 	its button uses up the link and signs in. Mail scanners and link previews only
