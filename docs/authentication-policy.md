@@ -2,7 +2,7 @@
 
 This page describes what Keyless does in each situation. It covers the
 security fixes on branch `fix/security-audit-2026-10` (audit of 7 October 2026):
-Phase 1 (C-1, C-2, H-4), Phase 2 (H-1, H-2, H-3, H-5) and Phase 3 (M-1 to M-4). Phase 4 will extend it.
+Phase 1 (C-1, C-2, H-4), Phase 2 (H-1, H-2, H-3, H-5), Phase 3 (M-1 to M-4) and Phase 4 (L-1 to L-4, I-1).
 
 Settings named here live in **Keyless Settings** unless stated otherwise.
 "Blocked" means the request gets **HTTP 401** with the message
@@ -132,6 +132,13 @@ reveal nothing. Hitting a limit gives HTTP 429, *"Too many attempts. Try again l
 | An account makes twice **Max OTP Attempts** wrong guesses in an hour, across all its codes | Every code for it is refused until the hour is up. Requesting a new code does not reset this. |
 | Someone guesses wrong | The code keeps its original expiry (**OTP Expiry**); guessing never extends it. |
 | Two requests send the right code at the same moment | Only one gets a session. |
+| An address has asked for too many **magic links** | The same hourly and daily limits apply to links as to codes, counted separately. |
+| An address gets 10 wrong **recovery codes** in an hour | Recovery codes for it are refused until the hour is up. |
+| Two requests use the same recovery code at the same moment | Only one gets a session; the code is then used. |
+
+Limits per client IP only stop floods from one address, so that a whole office behind one
+IP is not locked out: 20 times **Rate Limit per Hour** for code, link and recovery-code
+requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 
 ### What people see when they request a code or link
 
@@ -178,7 +185,9 @@ used to sign in (Keyless has always registered discoverable ones).
 |---|---|
 | The passkey's response carries a user handle that is not the bound user's WebAuthn handle | Refused, *"Passkey does not match this account"*. Logged as `passkey_failed` / `user_handle_mismatch`. |
 | The response carries no user handle at all | Refused the same way. Keyless registers resident keys, and browsers always return the handle for those. |
+| The handle matches and the signature verifies, but the user is disabled | Refused, *"User is disabled"*. Nothing about the attempt is stored on the passkey. |
 | The handle matches and the signature verifies | Signed in. |
+| Verification fails for any reason | *"Could not verify this passkey."* The technical reason is only in the audit log (`detail`). |
 
 ### Adding a passkey or generating new backup codes
 
@@ -274,15 +283,24 @@ Password (break-glass), Hide User Enumeration, and User Verification = required.
 
 ## 7. Audit log entries
 
+How entries are written:
+
+| If… | Then… |
+|---|---|
+| Something is logged during a web request | The entry is written after the response, in its own transaction. Logging never saves the request's other changes early. |
+| The request then fails | Its other changes are rolled back, but the audit entry is still written. |
+| The IP address is recorded | It is Frappe's resolved client IP. The raw `X-Forwarded-For` header is never stored. See the README's "Reverse proxy" section. |
+
 New or changed events in **Keyless Audit Log**:
 
 | Event | When | Notes |
 |---|---|---|
 | `password_blocked` | A password login or OAuth password grant was blocked | `method` is `password` or `oauth_password`. For an unknown login name, `user` is `Guest` and the typed name is in `detail`. |
 | `factor_blocked` | Email OTP or magic link refused | `detail` is `passkey_required` (System User rule) or `frappe_2fa` (Frappe 2FA applies). |
-| `passkey_failed` | Passkey sign-in refused | New `detail` value: `user_handle_mismatch`. |
+| `passkey_failed` | Passkey sign-in refused | New `detail` values: `user_handle_mismatch`, `user_disabled`, and the verification library's message. |
+| `passkey_register_failed` | Passkey registration refused | Was never recorded before this release; the event name was missing from the log's list. |
 | `step_up` / `step_up_failed` | Someone confirmed it was them (or failed to) before changing sign-in methods | `method` is `passkey` or `email_otp`. |
-| `backup_failed` | Recovery code refused | Now also logged for addresses with no account (`user` is `Guest`). |
+| `backup_failed` | Recovery code refused | Now also logged for addresses with no account (`user` is `Guest`). `detail` is `already_used` when another request used the code first. |
 
 ---
 
@@ -307,6 +325,9 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Adding a passkey or generating backup codes asks people to confirm it's them | Nothing; set **Step-up Window** if 5 minutes does not suit. |
 | Passkey sign-in no longer uses the email field | Nothing for passkeys registered by Keyless. |
 | The reverse proxy must overwrite `X-Forwarded-For` | See the README's "Reverse proxy" section. |
+| Keyless refuses to issue or check codes without `encryption_key` in site_config | Frappe creates it with every new site; check it exists. **Rotating `encryption_key` invalidates every stored backup code**, so ask users to generate new codes afterwards. |
+| Per-IP limits are much higher; per-account limits now also cover magic links and recovery codes | Review **Rate Limit per Hour** and **Daily Code Limit per Account**. |
+| The hourly `purge_expired_challenges` job is removed | Nothing; it never did anything. |
 
 ---
 
