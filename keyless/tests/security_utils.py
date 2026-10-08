@@ -24,7 +24,12 @@ def http(client, method: str, path: str, **kwargs):
 
 	def run():
 		with patch("frappe.app.get_site_name", return_value=site):
-			result["response"] = getattr(client, method)(path, **kwargs)
+			response = getattr(client, method)(path, **kwargs)
+			# Read and close on this thread, as a real server does: closing runs
+			# Frappe's after_response callbacks and frappe.destroy for the request.
+			response.get_data()
+			response.close()
+			result["response"] = response
 
 	thread = Thread(target=run)
 	thread.start()

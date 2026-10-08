@@ -60,7 +60,7 @@ class StepUpCase(FrappeTestCase):
 
 	def setUp(self):
 		reset_rate_limits()
-		# log_event commits mid-request (audit L-4), so rows can outlive a rollback.
+		# Start each test without rows left by earlier tests or runs.
 		for dt in ("User Passkey", "Keyless Backup Code"):
 			frappe.db.delete(dt, {"user": ("in", (USER, OTHER))})
 		frappe.db.commit()
