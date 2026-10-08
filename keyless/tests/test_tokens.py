@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import time
 import unittest
 from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from keyless.tokens import compare, digest, random_otp, store_otp, verify_and_consume_otp
+from keyless.tokens import OTP_CACHE_PREFIX, compare, digest, random_otp, store_otp, verify_and_consume_otp
 
 
 class TestTokens(FrappeTestCase):
@@ -34,6 +35,21 @@ class TestTokens(FrappeTestCase):
 		for _ in range(5):
 			self.assertFalse(verify_and_consume_otp(email, "000000", max_attempts=5))
 		self.assertFalse(verify_and_consume_otp(email, "111111", max_attempts=5))
+
+	def test_wrong_guess_keeps_original_expiry(self):
+		email = "expiry@example.com"
+		store_otp(email, "222222", 120)
+		self.assertFalse(verify_and_consume_otp(email, "000000", max_attempts=5))
+		ttl = frappe.cache.ttl(frappe.cache.make_key(f"{OTP_CACHE_PREFIX}{email}"))
+		self.assertTrue(0 < ttl <= 120, ttl)
+		self.assertTrue(verify_and_consume_otp(email, "222222", max_attempts=5))
+
+	def test_wrong_guess_after_expiry_deletes_code(self):
+		email = "expired@example.com"
+		store_otp(email, "333333", 120)
+		with patch("keyless.tokens.time.time", return_value=time.time() + 121):
+			self.assertFalse(verify_and_consume_otp(email, "000000", max_attempts=5))
+		self.assertFalse(verify_and_consume_otp(email, "333333", max_attempts=5))
 
 	def test_otp_length_bounds(self):
 		self.assertEqual(len(random_otp(6)), 6)

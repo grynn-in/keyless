@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import time
 from typing import Any
 
 import frappe
@@ -68,6 +69,7 @@ def store_otp(email: str, otp: str, expires_in_sec: int) -> None:
 			"digest": digest(otp),
 			"attempts": 0,
 			"created": str(now_datetime()),
+			"expires_at": int(time.time()) + int(expires_in_sec),
 		},
 		expires_in_sec,
 	)
@@ -83,7 +85,13 @@ def verify_and_consume_otp(email: str, otp: str, max_attempts: int = 5) -> bool:
 		cache_delete(OTP_CACHE_PREFIX, email)
 		return False
 	if not compare(otp.strip(), payload.get("digest") or ""):
-		cache_set(OTP_CACHE_PREFIX, email, payload, expires_in_sec=300)
+		# Keep the code's original expiry: saving the attempt count must not
+		# extend (or shorten) how long the code stays valid.
+		remaining = cint(payload.get("expires_at")) - int(time.time())
+		if remaining <= 0:
+			cache_delete(OTP_CACHE_PREFIX, email)
+			return False
+		cache_set(OTP_CACHE_PREFIX, email, payload, expires_in_sec=remaining)
 		return False
 	cache_delete(OTP_CACHE_PREFIX, email)
 	return True
