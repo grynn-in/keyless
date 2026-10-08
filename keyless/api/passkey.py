@@ -173,7 +173,8 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 			success=False,
 			detail=str(e)[:140],
 		)
-		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
+		# The library's text stays in the audit log only (audit L-3).
+		frappe.throw(_("Could not verify this passkey."), frappe.AuthenticationError)
 
 	credential_id = bytes_to_base64url(verification.credential_id)
 	if frappe.db.exists("User Passkey", {"credential_id": credential_id}):
@@ -264,7 +265,8 @@ def verify_assertion(credential: str | dict, challenge: dict, settings):
 		)
 	except (InvalidAuthenticationResponse, WebAuthnException) as e:
 		log_event("passkey_failed", method="passkey", success=False, detail=str(e)[:140])
-		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
+		# The library's text stays in the audit log only (audit L-3).
+		frappe.throw(_("Could not verify this passkey."), frappe.AuthenticationError)
 
 	frappe.db.set_value(
 		"User Passkey",
