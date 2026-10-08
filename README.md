@@ -38,6 +38,7 @@ Login URL: `/keyless/login`. Set **Replace Standard Login Page** to send `/login
 ## Architecture (short)
 
 For what happens in each situation (which logins are blocked, what users see, what to check after upgrading), see [docs/authentication-policy.md](docs/authentication-policy.md).
+The 2026-10 security audit remediation is summarised in [docs/security-audit-2026-10-report.md](docs/security-audit-2026-10-report.md).
 
 1. Guest POSTs to `keyless.api.*` (rate-limited, `allow_guest=True`).
 2. Challenge or OTP lives in Redis, peppered with `encryption_key`.
