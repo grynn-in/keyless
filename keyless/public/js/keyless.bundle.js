@@ -42,14 +42,22 @@ keyless.ensure_recent_auth = async function () {
 	if (state.methods.includes("email")) {
 		await frappe.xcall("keyless.api.stepup.request_email_code");
 		const code = await new Promise((resolve, reject) => {
+			// The hint is the field's description: set_message() would hide the field.
 			const dialog = frappe.prompt(
-				{ fieldname: "otp", fieldtype: "Data", label: __("Code"), reqd: 1 },
+				{
+					fieldname: "otp",
+					fieldtype: "Data",
+					label: __("Code"),
+					reqd: 1,
+					description: __("We emailed you a code."),
+				},
 				(values) => resolve(values.otp),
 				__("Confirm it's you"),
 				__("Confirm")
 			);
-			dialog.set_message(__("We emailed you a code."));
-			dialog.onhide = () => reject(new Error(__("Cancelled")));
+			// frappe.prompt hides the dialog before calling back, so defer the
+			// "cancelled" rejection: after a submit, resolve() has already won.
+			dialog.onhide = () => setTimeout(() => reject(new Error(__("Cancelled"))));
 		});
 		await frappe.xcall("keyless.api.stepup.verify_email_code", { otp: code });
 		return;
