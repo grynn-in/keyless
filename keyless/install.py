@@ -69,7 +69,8 @@ def _ensure_settings():
 	doc.otp_expiry_seconds = 300
 	doc.magic_link_expiry_minutes = 10
 	doc.max_otp_attempts = 5
-	doc.rate_limit_per_hour = 5
+	doc.rate_limit_requests = 5
+	doc.rate_limit_window_seconds = 3600
 	doc.passkey_user_verification = "required"
 	doc.audit_retention_days = 90
 	doc.flags.ignore_permissions = True

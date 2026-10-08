@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import time
+from functools import wraps
 from urllib.parse import urlparse
 
 import frappe
 from frappe import _
+from frappe.rate_limiter import rate_limit
 
 from keyless.settings import get_settings, is_enabled
 from keyless.user import resolve_enabled_user
@@ -18,9 +20,30 @@ def require_enabled():
 
 def get_rate_limit() -> int:
 	try:
-		return int(get_settings().rate_limit_per_hour or 5)
+		return int(get_settings().rate_limit_requests or 5)
 	except Exception:
 		return 5
+
+
+def get_rate_limit_window() -> int:
+	try:
+		return int(get_settings().rate_limit_window_seconds or 3600)
+	except Exception:
+		return 3600
+
+
+def keyless_rate_limit(fn):
+	"""Per-IP limit from Keyless Settings: `rate_limit_requests` per `rate_limit_window_seconds`.
+
+	frappe's `rate_limit` takes `seconds` as a fixed int, so the decorator is
+	built per request to pick up the current window.
+	"""
+
+	@wraps(fn)
+	def wrapper(*args, **kwargs):
+		return rate_limit(limit=get_rate_limit, seconds=get_rate_limit_window())(fn)(*args, **kwargs)
+
+	return wrapper
 
 
 def normalize_email(email: str) -> str:

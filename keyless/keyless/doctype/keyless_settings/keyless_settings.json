@@ -24,7 +24,8 @@
     "max_otp_attempts",
     "column_break_otp",
     "magic_link_expiry_minutes",
-    "rate_limit_per_hour",
+    "rate_limit_requests",
+    "rate_limit_window_seconds",
     "audit_retention_days",
     "section_webauthn",
     "rp_name",
@@ -145,9 +146,17 @@
     },
     {
       "default": "5",
-      "fieldname": "rate_limit_per_hour",
+      "description": "Requests each client IP may make to each Keyless endpoint within the window.",
+      "fieldname": "rate_limit_requests",
       "fieldtype": "Int",
-      "label": "Rate Limit per Hour"
+      "label": "Rate Limit (requests)"
+    },
+    {
+      "default": "3600",
+      "description": "Length of the rate-limit window. 60 with 5 requests means 5 per minute.",
+      "fieldname": "rate_limit_window_seconds",
+      "fieldtype": "Int",
+      "label": "Rate Limit Window (seconds)"
     },
     {
       "default": "90",

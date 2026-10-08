@@ -29,7 +29,8 @@ class KeylessSettings(Document):
 		otp_expiry_seconds: DF.Int
 		otp_length: DF.Int
 		passkey_user_verification: DF.Literal["required", "preferred", "discouraged"]
-		rate_limit_per_hour: DF.Int
+		rate_limit_requests: DF.Int
+		rate_limit_window_seconds: DF.Int
 		replace_standard_login: DF.Check
 		require_passkey_for_system_users: DF.Check
 		rp_id: DF.Data | None
@@ -43,6 +44,10 @@ class KeylessSettings(Document):
 			frappe.throw(_("OTP expiry must be at least 60 seconds"))
 		if self.magic_link_expiry_minutes and int(self.magic_link_expiry_minutes) < 2:
 			frappe.throw(_("Magic link expiry must be at least 2 minutes"))
+		if self.rate_limit_requests is not None and int(self.rate_limit_requests) < 1:
+			frappe.throw(_("Rate limit must allow at least 1 request"))
+		if self.rate_limit_window_seconds is not None and int(self.rate_limit_window_seconds) < 1:
+			frappe.throw(_("Rate limit window must be at least 1 second"))
 		if self.rp_id:
 			host = self.rp_id.strip().lower()
 			if "://" in host:

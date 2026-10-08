@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.rate_limiter import rate_limit
 from frappe.utils import get_url
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
 	constant_time_delay,
-	get_rate_limit,
+	keyless_rate_limit,
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
@@ -19,7 +18,7 @@ from keyless.tokens import consume_magic_key, random_token, store_magic_key
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def send_link(email: str, redirect_to: str | None = None):
 	settings = require_enabled()
 	if not settings.enable_magic_link:
@@ -50,7 +49,7 @@ def send_link(email: str, redirect_to: str | None = None):
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def login_via_link(key: str, redirect_to: str | None = None):
 	settings = require_enabled()
 	if not settings.enable_magic_link:

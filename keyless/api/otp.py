@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import (
 	constant_time_delay,
-	get_rate_limit,
+	keyless_rate_limit,
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
@@ -17,7 +16,7 @@ from keyless.tokens import random_otp, store_otp, verify_and_consume_otp
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def request_otp(email: str):
 	"""Send a one-time email code. Always returns ok when enumeration is hidden."""
 	settings = require_enabled()
@@ -47,7 +46,7 @@ def request_otp(email: str):
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def verify_otp(email: str, otp: str):
 	settings = require_enabled()
 	if not settings.enable_email_otp:

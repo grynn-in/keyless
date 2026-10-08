@@ -2,3 +2,4 @@
 
 [post_model_sync]
 keyless.patches.v1_0.create_user_handle_custom_field
+keyless.patches.v1_0.split_rate_limit_setting

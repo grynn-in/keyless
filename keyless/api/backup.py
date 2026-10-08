@@ -4,9 +4,8 @@ import secrets
 
 import frappe
 from frappe import _
-from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import get_rate_limit, normalize_email, require_enabled
+from keyless.api.common import keyless_rate_limit, normalize_email, require_enabled
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import compare, digest
@@ -46,7 +45,7 @@ def generate_codes():
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def redeem(email: str, code: str):
 	settings = require_enabled()
 	if not settings.enable_backup_codes:

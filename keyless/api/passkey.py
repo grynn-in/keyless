@@ -11,9 +11,8 @@ import json
 
 import frappe
 from frappe import _
-from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import client_origin, get_rate_limit, rp_id, rp_name, require_enabled
+from keyless.api.common import client_origin, keyless_rate_limit, rp_id, rp_name, require_enabled
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import consume_challenge, random_token, store_challenge
@@ -173,7 +172,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def authentication_options(email: str | None = None):
 	from webauthn import generate_authentication_options
 	from webauthn.helpers import base64url_to_bytes
@@ -208,7 +207,7 @@ def authentication_options(email: str | None = None):
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@keyless_rate_limit
 def verify_authentication(credential: str | dict, challenge_id: str):
 	from webauthn import verify_authentication_response
 	from webauthn.helpers import base64url_to_bytes
