@@ -80,6 +80,11 @@ def redeem(email: str, code: str):
 		log_event("backup_failed", user=user or "Guest", method="backup", success=False)
 		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)
 
+	# Lock the row and re-check it is unused, so parallel requests with the same
+	# code wait for each other and only the first one signs in (audit L-1).
+	if not frappe.db.get_value("Keyless Backup Code", {"name": match.name, "used": 0}, "name", for_update=True):
+		log_event("backup_failed", user=user, method="backup", success=False, detail="already_used")
+		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)
 	frappe.db.set_value(
 		"Keyless Backup Code",
 		match.name,
