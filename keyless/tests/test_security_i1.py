@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import secrets
 from pathlib import Path
@@ -22,16 +24,31 @@ ON = {"enabled": 1, "enable_passkeys": 1, "rp_id": "", "allowed_origins": ""}
 
 
 class TestPepper(FrappeTestCase):
-	def test_missing_encryption_key_fails_closed(self):
+	def test_missing_encryption_key_is_created_not_replaced(self):
+		# A new site has no encryption_key until something first encrypts a value.
+		# Keyless must create one (as Frappe does), never fall back to secret_key.
 		conf = frappe.local.conf
 		saved = conf.pop("encryption_key", None)
 		try:
-			with patch.dict(conf, {"secret_key": "not-a-pepper"}):
-				with self.assertRaisesRegex(frappe.ValidationError, "encryption_key"):
-					tokens.digest("123456")
+			with (
+				patch.dict(conf, {"secret_key": "not-a-pepper"}),
+				patch("frappe.installer.update_site_config") as save,
+			):
+				value = tokens.digest("123456")
+				created = conf.get("encryption_key")
+			self.assertTrue(created)
+			save.assert_called_once_with("encryption_key", created)
+			self.assertNotEqual(value, hmac.new(b"not-a-pepper", b"123456", hashlib.sha256).hexdigest())
+			self.assertEqual(value, hmac.new(created.encode(), b"123456", hashlib.sha256).hexdigest())
 		finally:
+			conf.pop("encryption_key", None)
 			if saved is not None:
 				conf["encryption_key"] = saved
+
+	def test_empty_encryption_key_fails_closed(self):
+		with patch.object(tokens, "get_encryption_key", return_value=""):
+			with self.assertRaisesRegex(frappe.ValidationError, "encryption_key"):
+				tokens.digest("123456")
 
 	def test_digest_uses_encryption_key(self):
 		self.assertEqual(len(tokens.digest("123456")), 64)

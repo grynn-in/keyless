@@ -15,6 +15,7 @@ from typing import Any
 import frappe
 from frappe import _
 from frappe.utils import cint, now_datetime
+from frappe.utils.password import get_encryption_key
 
 
 OTP_CACHE_PREFIX = "keyless:otp:"
@@ -26,10 +27,11 @@ RATE_CACHE_PREFIX = "keyless:rl:"
 
 
 def _pepper() -> str:
-	"""The site's encryption_key. Fail closed without it: hashing codes with an empty
-	or guessable pepper would make stored digests easy to reverse (audit I-1).
+	"""The site's encryption_key, never secret_key or an empty pepper (audit I-1).
+	A new site has none until something first encrypts a value; Frappe's own helper then
+	creates and saves one, as it does for encrypted passwords.
 	Rotating encryption_key invalidates every stored backup code."""
-	key = frappe.local.conf.get("encryption_key")
+	key = get_encryption_key()
 	if not key:
 		frappe.throw(
 			_("Keyless needs encryption_key in site_config.json before it can issue or check codes."),
