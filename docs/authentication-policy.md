@@ -23,12 +23,20 @@ Frappe signs a user in with a password on these paths, and Keyless enforces the 
 | Second step of Frappe's two-factor login (`tmp_id` + `otp`) | yes |
 | OAuth2 token endpoint with `grant_type=password` (see section 2) | yes |
 
+Frappe's **password reset link** (from "Forgot password", or from an expired password) signs the
+person in once the new password is set. That session follows the password rules: if password login
+is blocked for the user, or the user is a System User under **Require a Passkey for System Users**,
+the reset is refused with *"Sign in with a passkey."* and nothing changes. It is **not** refused for
+users Frappe 2FA applies to, so they can still recover a forgotten password, even though Frappe's
+reset skips 2FA (open decision: refusing it would close that gap but lock them out of recovery). Frappe's own **email-link login** follows the email-factor rules
+(section 3) the same way. Both are logged as `factor_blocked`.
+
 These do **not** go through the password policy, by design:
 
 | Path | Why |
 |---|---|
 | Keyless factors (passkey, email OTP, magic link, backup code) | They are the replacement for passwords. See section 3. |
-| LDAP login, social login (OAuth providers), Frappe's own email-link login, impersonation by Administrator | They sign in through `login_as`, not with a password. |
+| LDAP login, social login (OAuth providers), impersonation by Administrator | They sign in through `login_as`, not with a password. |
 | API key / secret (`Authorization: token key:secret`) and existing OAuth bearer tokens | They are not logins. Disabling passwords does **not** revoke them. Revoke keys and tokens yourself if needed. |
 
 ### Decision rules
@@ -62,16 +70,12 @@ Rules are checked in this order; the first that matches wins.
   the password. If that matters, turn on **Disable Password Login** site-wide.
 - Blocked attempts do not count towards Frappe's failed-login lockout, because no password is checked.
 
-**On Frappe 15** there is no `before_login` hook, so the policy can only run from `on_login`,
-after Frappe has checked the password (and after Frappe 2FA, if it applies). There:
-
-- **A blocked login gets Frappe's *"Invalid login credentials"***, the same response as a wrong
-  password, so the response still never confirms a password. The person is not told that
-  password login is disabled; the audit log records `password_blocked` with the real reason.
-- **The password is checked**, so blocked attempts with a wrong password count towards
-  Frappe's failed-login lockout.
-- **A blocked user who has Frappe 2FA** is asked for their 2FA code first, which shows the
-  password was right. Rules 5 and 6 (per-user blocks) are where this can happen.
+**On Frappe 15**, which has no `before_login` trigger, Keyless adds the one call Frappe 16 makes
+at the start of `LoginManager.login()` (`keyless/compat.py`), so the rules above hold there too:
+the policy runs before the password is checked. The patch is in place once a worker process has
+imported Keyless, which its first Keyless hook does. Until then, `on_login` checks the password
+login instead, after the password check: a blocked login then gets Frappe's *"Invalid login
+credentials"*, the same response as a wrong password.
 
 ### Frappe's own "Disable Username/Password Login"
 
@@ -326,7 +330,8 @@ Run `bench --site <site> migrate` after updating. Then check:
 | OAuth clients using the password grant stop working when password login is disabled for that user | Move them to the authorization-code grant or API keys. |
 | The **Allow Passwordless Signup** setting is removed | Nothing. It was never enforced; Keyless has no signup flow. |
 | The `login` method override (`keyless.overrides.login`) is removed | Nothing, unless other code imported it. The policy now runs from the `before_login`, `on_login` and `before_request` hooks. |
-| On Frappe 15 a blocked password login says *"Invalid login credentials"* | Tell users who are moved to passkeys that their password no longer works, since the message will not say so. |
+| Password reset links no longer sign in users whose password login is blocked, or System Users who need a passkey | Those users sign in with a passkey (or a recovery code). |
+| Passkeys are only accepted from configured origins, and the migrate warns (Error Log "Keyless: check passkey origins") when none is https | Behind a proxy that terminates TLS, set `host_name` to the https URL or add it to Allowed Origins. |
 | `report_repointed_passkeys` runs during migrate | Check the Error Log for "Keyless: review User Passkey ownership". |
 | Users with Frappe 2FA can no longer sign in with email OTP or magic links | Make sure they have a passkey (or backup codes) before upgrading, or they will need a password plus Frappe 2FA. |
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |

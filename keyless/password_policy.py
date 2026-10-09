@@ -110,6 +110,52 @@ def block_oauth_password_grant() -> None:
 	enforce(login_name=form.get("username"), method="oauth_password")
 
 
+# Frappe methods that create a session from a mailed secret: the password
+# reset link (update_password with a key, also reached from an expired
+# password) and Frappe's own "login with email link".
+RESET_METHOD = "frappe.core.doctype.user.user.update_password"
+EMAIL_LINK_METHOD = "frappe.www.login.login_via_key"
+API_METHOD_PREFIXES = ("/api/method/", "/api/v1/method/", "/api/v2/method/")
+
+
+def called_method() -> str:
+	"""Dotted name of the whitelisted method this request calls, or ""."""
+	request = getattr(frappe.local, "request", None)
+	path = (getattr(request, "path", "") or "").rstrip("/")
+	for prefix in API_METHOD_PREFIXES:
+		if path.startswith(prefix):
+			return path[len(prefix) :]
+	return frappe.form_dict.get("cmd") or ""
+
+
+def enforce_mailed_login(user: str) -> None:
+	"""on_login check for sessions Frappe creates from a mailed secret.
+
+	Frappe's email-link login proves only control of the mailbox, so it is
+	held to the email-factor rules (D3, D5). A reset link signs the user in
+	after setting a password, so it is held to the password rules, and to D5
+	(System Users who need a passkey). It is not refused for Frappe 2FA users
+	(D3): that would leave them no way to recover a forgotten password; the
+	reset skipping Frappe 2FA is Frappe's own behaviour. Raising here stops
+	login_as before the session exists, and the request (including the new
+	password) is rolled back.
+	"""
+	method = called_method()
+	if method not in (RESET_METHOD, EMAIL_LINK_METHOD) or not is_enabled():
+		return
+	settings = get_settings()
+	reason = email_factor_refusal(user)
+	if method == RESET_METHOD:
+		if reason == "frappe_2fa":
+			reason = None
+		if not reason and password_blocked(user, settings, frappe_2fa_runs=False):
+			reason = "password_blocked"
+	if not reason:
+		return
+	log_event("factor_blocked", user=user, method=method.rsplit(".", 1)[-1], success=False, detail=reason)
+	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
+
+
 def is_password_login_request() -> bool:
 	"""True on the requests LoginManager() treats as a username/password login."""
 	request = getattr(frappe.local, "request", None)
