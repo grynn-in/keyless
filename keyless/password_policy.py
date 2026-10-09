@@ -4,6 +4,10 @@ Frappe performs username/password login inside `LoginManager()` itself
 (`cmd=login` on any path, or `/api/method/login`), before any whitelisted
 method runs, so the policy is enforced from the `before_login` and
 `on_login` hooks, which run on every password path (audit C-2).
+
+Frappe 15 has no `before_login` hook. There the policy runs from `on_login`,
+after the password has been checked, and a blocked login is refused exactly
+as a wrong password is, so the response still never confirms a password.
 """
 
 from __future__ import annotations
@@ -106,14 +110,20 @@ def block_oauth_password_grant() -> None:
 	enforce(login_name=form.get("username"), method="oauth_password")
 
 
-def enforce(*, login_name: str | None = None, user: str | None = None, method: str = "password") -> None:
-	"""Raise AuthenticationError if this password login is not allowed."""
+def is_password_login_request() -> bool:
+	"""True on the requests LoginManager() treats as a username/password login."""
+	request = getattr(frappe.local, "request", None)
+	return frappe.form_dict.get("cmd") == "login" or getattr(request, "path", None) == "/api/method/login"
+
+
+def _blocked(*, login_name: str | None = None, user: str | None = None, method: str = "password") -> bool:
+	"""True, after writing the audit entry, if this password login is not allowed."""
 	if not is_enabled():
-		return
+		return False
 	if user is None:
 		user = resolve_login_name(login_name)
 	if not password_blocked(user, get_settings(), frappe_2fa_runs=method == "password"):
-		return
+		return False
 	log_event(
 		"password_blocked",
 		user=user or "Guest",
@@ -121,4 +131,21 @@ def enforce(*, login_name: str | None = None, user: str | None = None, method: s
 		success=False,
 		detail=None if user else (login_name or "")[:140],
 	)
-	frappe.throw(_(BLOCKED_MESSAGE), frappe.AuthenticationError)
+	return True
+
+
+def enforce(*, login_name: str | None = None, user: str | None = None, method: str = "password") -> None:
+	"""Raise AuthenticationError if this password login is not allowed."""
+	if _blocked(login_name=login_name, user=user, method=method):
+		frappe.throw(_(BLOCKED_MESSAGE), frappe.AuthenticationError)
+
+
+def enforce_after_password_check(login_manager) -> None:
+	"""Frappe 15 path: the password is already verified when this runs.
+
+	Answering with BLOCKED_MESSAGE here would tell a caller the password was
+	right, so fail the login the way Frappe fails a wrong password. The audit
+	log keeps the real reason.
+	"""
+	if _blocked(user=login_manager.user):
+		login_manager.fail("Invalid login credentials", user=login_manager.user)
