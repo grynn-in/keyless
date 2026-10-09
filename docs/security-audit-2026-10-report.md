@@ -32,7 +32,7 @@ in its last section.
 ## I-1 checklist
 
 - [x] Document scrubbing `key=` from reverse-proxy access logs (README, "Reverse proxy").
-- [x] HMAC pepper fails closed without `encryption_key`; rotation invalidates backup codes (documented).
+- [x] HMAC pepper never falls back to `secret_key` or an empty value; a missing `encryption_key` is created the way Frappe creates it; rotation invalidates backup codes (documented).
 - [x] `verify_authentication` checks the user is enabled before storing the sign count.
 - [x] Document pairing `allow_administrator_password` with `restrict_ip` and alerting.
 - [x] Remove the no-op `_sync_login_redirect` and `purge_expired_challenges`.

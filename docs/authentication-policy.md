@@ -337,7 +337,7 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Adding a passkey or generating backup codes asks people to confirm it's them | Nothing; set **Step-up Window** if 5 minutes does not suit. |
 | Passkey sign-in no longer uses the email field | Nothing for passkeys registered by Keyless. |
 | The reverse proxy must overwrite `X-Forwarded-For` | See the README's "Reverse proxy" section. |
-| Keyless refuses to issue or check codes without `encryption_key` in site_config | Frappe creates it with every new site; check it exists. **Rotating `encryption_key` invalidates every stored backup code**, so ask users to generate new codes afterwards. |
+| Codes are peppered with `encryption_key` from site_config | A new site may not have one yet; Keyless then creates and saves it, as Frappe does for encrypted passwords. It never falls back to `secret_key` or an empty value. **Rotating `encryption_key` invalidates every stored backup code**, so ask users to generate new codes afterwards. |
 | Per-IP limits are much higher; per-account limits now also cover magic links and recovery codes | Review **Rate Limit per Hour** and **Daily Code Limit per Account**. |
 | The hourly `purge_expired_challenges` job is removed | Nothing; it never did anything. |
 
