@@ -176,6 +176,11 @@ class TestOAuthPasswordGrant(H4Case):
 		self.assertNotIn("access_token", response.get_data(as_text=True))
 
 	def test_password_grant_works_when_policy_off(self):
+		from frappe.oauth import OAuthWebRequestValidator
+
+		if not OAuthWebRequestValidator().validate_grant_type(None, "password", None, None):
+			# Frappe 15.121+ dropped the password grant; nothing for Keyless to allow.
+			self.skipTest("this Frappe version does not support the OAuth password grant")
 		with keyless_settings(**BLOCK_PER_USER):
 			response = self._password_grant(SYS_USER, PASSWORD)
 		self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
