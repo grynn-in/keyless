@@ -47,8 +47,10 @@ def on_login(login_manager):
 			# Authoritative check on the user Frappe actually authenticated.
 			password_policy.enforce(user=login_manager.user)
 		elif password_policy.is_password_login_request():
-			# Frappe 15: before_login does not exist, so this is the only check.
+			# Frappe 15 before keyless.compat patched login() in this process.
 			password_policy.enforce_after_password_check(login_manager)
+		else:
+			password_policy.enforce_mailed_login(login_manager.user)
 	log_event(
 		"session_created",
 		user=getattr(login_manager, "user", None),

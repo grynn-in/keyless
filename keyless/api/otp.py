@@ -6,6 +6,7 @@ from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import (
 	HOUR,
+	after_response,
 	get_ip_rate_limit,
 	limit_mail_requests,
 	normalize_email,
@@ -35,19 +36,11 @@ def request_otp(email: str):
 
 	limit_mail_requests(email, settings, "otp")
 
-	user = pretend_success_if_unknown(email)
 	expires = int(settings.otp_expiry_seconds or 300)
 	length = int(settings.otp_length or 6)
-
-	if user:
-		otp = random_otp(length)
-		store_otp(email, otp, expires)
-		_send_otp_mail(email, otp, expires)
-		log_event("otp_requested", user=user, method="email_otp", success=True)
-	else:
-		if not settings.hide_user_enumeration:
-			frappe.throw(_("No active user found"), frappe.DoesNotExistError)
-		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
+	if not settings.hide_user_enumeration and not pretend_success_if_unknown(email):
+		frappe.throw(_("No active user found"), frappe.DoesNotExistError)
+	after_response(lambda: _deliver_otp(email, expires, length))
 
 	return {"ok": True, "expires_in": expires, "length": length}
 
@@ -73,6 +66,18 @@ def verify_otp(email: str, otp: str):
 
 	issue_session(user, method="email_otp")
 	return {"ok": True, "user": user, "home": _home_for(user)}
+
+
+def _deliver_otp(email: str, expires: int, length: int) -> None:
+	"""Create and mail a code if the address has an account; runs after the response."""
+	user = pretend_success_if_unknown(email)
+	if not user:
+		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
+		return
+	otp = random_otp(length)
+	store_otp(email, otp, expires)
+	_send_otp_mail(email, otp, expires)
+	log_event("otp_requested", user=user, method="email_otp", success=True)
 
 
 def _send_otp_mail(email: str, otp: str, expires: int):

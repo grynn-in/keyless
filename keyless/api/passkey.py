@@ -39,11 +39,15 @@ def _handle_bytes(handle: str) -> bytes:
 	return bytes.fromhex(handle) if len(handle) == 32 else handle.encode("utf-8")
 
 
-def _user_handle_matches(cred: dict, passkey) -> bool:
+def _user_handle_matches(cred: dict, passkey, *, required: bool = True) -> bool:
 	"""The assertion's userHandle must be the registered handle of passkey.user.
 
-	Passkeys are created as resident keys, so authenticators always return
-	userHandle; a missing one is treated as a mismatch.
+	Sign-in uses discoverable credentials, for which authenticators always
+	return userHandle, so a missing one is a mismatch there. Step-up names the
+	credentials in allowCredentials, and CTAP2 authenticators may then omit
+	userHandle when only one matches; with `required=False` a missing handle
+	is accepted (the challenge already binds the session user), a wrong one
+	never is.
 	"""
 	from webauthn.helpers import base64url_to_bytes
 
@@ -52,7 +56,7 @@ def _user_handle_matches(cred: dict, passkey) -> bool:
 		return False
 	asserted = ((cred.get("response") or {}).get("userHandle") or "").strip()
 	if not asserted:
-		return False
+		return not required
 	try:
 		asserted_bytes = base64url_to_bytes(asserted)
 	except Exception:
@@ -249,7 +253,7 @@ def verify_assertion(credential: str | dict, challenge: dict, settings):
 	if challenge.get("user") and challenge["user"] != passkey.user:
 		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
 
-	if not _user_handle_matches(cred, passkey):
+	if not _user_handle_matches(cred, passkey, required=challenge.get("type") != "stepup"):
 		log_event("passkey_failed", method="passkey", success=False, detail="user_handle_mismatch")
 		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
 

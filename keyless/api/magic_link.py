@@ -7,6 +7,7 @@ from frappe.utils import escape_html, get_url
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
+	after_response,
 	get_ip_rate_limit,
 	limit_mail_requests,
 	normalize_email,
@@ -32,20 +33,11 @@ def send_link(email: str, redirect_to: str | None = None):
 
 	limit_mail_requests(email, settings, "link")
 
-	user = pretend_success_if_unknown(email)
 	expiry_min = int(settings.magic_link_expiry_minutes or 10)
-
-	if user:
-		key = random_token(32)
-		# The target stays in Redis with the key, never in the emailed URL (audit H-2).
-		store_magic_key(key, email, expiry_min * 60, redirect_to=safe_redirect(redirect_to))
-		link = get_url(f"/api/method/keyless.api.magic_link.login_via_link?key={key}", allow_header_override=False)
-		_send_link_mail(email, link, expiry_min)
-		log_event("magic_link_sent", user=user, method="magic_link", success=True)
-	else:
-		if not settings.hide_user_enumeration:
-			frappe.throw(_("No active user found"), frappe.DoesNotExistError)
-		log_event("magic_link_sent", user=email, method="magic_link", success=False, detail="unknown")
+	if not settings.hide_user_enumeration and not pretend_success_if_unknown(email):
+		frappe.throw(_("No active user found"), frappe.DoesNotExistError)
+	target = safe_redirect(redirect_to)
+	after_response(lambda: _deliver_link(email, expiry_min, target))
 
 	return {"ok": True, "expires_in": expiry_min * 60}
 
@@ -107,6 +99,20 @@ def _confirmation_page(key: str, redirect_to: str | None):
 		"</form>"
 	)
 	frappe.respond_as_web_page(_("Sign in"), html, indicator_color="blue", primary_action=None)
+
+
+def _deliver_link(email: str, expiry_min: int, redirect_to: str | None) -> None:
+	"""Create and mail a link if the address has an account; runs after the response."""
+	user = pretend_success_if_unknown(email)
+	if not user:
+		log_event("magic_link_sent", user=email, method="magic_link", success=False, detail="unknown")
+		return
+	key = random_token(32)
+	# The target stays in Redis with the key, never in the emailed URL (audit H-2).
+	store_magic_key(key, email, expiry_min * 60, redirect_to=redirect_to)
+	link = get_url(f"/api/method/keyless.api.magic_link.login_via_link?key={key}", allow_header_override=False)
+	_send_link_mail(email, link, expiry_min)
+	log_event("magic_link_sent", user=user, method="magic_link", success=True)
 
 
 def _send_link_mail(email: str, link: str, minutes: int):

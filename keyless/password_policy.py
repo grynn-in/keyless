@@ -5,12 +5,19 @@ Frappe performs username/password login inside `LoginManager()` itself
 method runs, so the policy is enforced from the `before_login` and
 `on_login` hooks, which run on every password path (audit C-2).
 
-Frappe 15 has no `before_login` hook. There the policy runs from `on_login`,
-after the password has been checked, and a blocked login is refused exactly
-as a wrong password is, so the response still never confirms a password.
+Frappe 15 has no `before_login` hook; `keyless.compat` adds it. Until that
+patch is in place in a worker process, `on_login` checks password logins
+after the password check and refuses a blocked one exactly as a wrong
+password is refused.
+
+Password reset links and Frappe's email-link login also create sessions
+(through `login_as`); `enforce_mailed_login` holds them to the rules.
 """
 
 from __future__ import annotations
+
+import inspect
+import sys
 
 import frappe
 from frappe import _
@@ -108,6 +115,71 @@ def block_oauth_password_grant() -> None:
 	if not (path.endswith("/" + OAUTH_TOKEN_METHOD) or form.get("cmd") == OAUTH_TOKEN_METHOD):
 		return
 	enforce(login_name=form.get("username"), method="oauth_password")
+
+
+def _caller_frame(func):
+	"""The frame of `func` if it is on the current call stack, else None.
+
+	Used instead of the request's URL or `cmd`: Frappe reaches the same
+	method through /api/method, /api/v1, /api/v2 (including doctype paths
+	such as /api/v2/method/User/update_password) and a `cmd` field that
+	overrides the path, so only the running code says which one it is
+	(review of #12).
+	"""
+	code = inspect.unwrap(func).__code__
+	frame = sys._getframe(2)
+	while frame is not None:
+		if frame.f_code is code:
+			return frame
+		frame = frame.f_back
+	return None
+
+
+def mailed_login_source() -> str | None:
+	"""Which Frappe flow is creating this session from a mailed secret:
+	"reset_link" (update_password with a reset key, also reached from an
+	expired password), "email_link" (Frappe's own email-link login), or None."""
+	from frappe.core.doctype.user.user import update_password
+	from frappe.www.login import login_via_key
+
+	frame = _caller_frame(update_password)
+	if frame is not None and frame.f_locals.get("key"):
+		return "reset_link"
+	if _caller_frame(login_via_key) is not None:
+		return "email_link"
+	return None
+
+
+def enforce_mailed_login(user: str) -> None:
+	"""on_login check for sessions Frappe creates from a mailed secret.
+
+	Frappe's email-link login proves only control of the mailbox, so it is
+	held to the email-factor rules (D3, D5). A reset link signs the user in
+	after setting a password, so it is held to the password rules, and to D5
+	(System Users who need a passkey). It is not refused for Frappe 2FA users
+	(D3): that would leave them no way to recover a forgotten password; the
+	reset skipping Frappe 2FA is Frappe's own behaviour. Raising here stops
+	login_as before the session exists, and the request (including the new
+	password) is rolled back.
+	"""
+	if not is_enabled():
+		return
+	source = mailed_login_source()
+	if source is None:
+		# Includes a signed-in user changing their own password with the old
+		# one: update_password also calls login_as then (review of #12).
+		return
+	settings = get_settings()
+	reason = email_factor_refusal(user)
+	if source == "reset_link":
+		if reason == "frappe_2fa":
+			reason = None
+		if not reason and password_blocked(user, settings, frappe_2fa_runs=False):
+			reason = "password_blocked"
+	if not reason:
+		return
+	log_event("factor_blocked", user=user, method=source, success=False, detail=reason)
+	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
 
 
 def is_password_login_request() -> bool:
