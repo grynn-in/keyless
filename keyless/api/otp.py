@@ -78,6 +78,7 @@ def verify_otp(email: str, otp: str):
 def _send_otp_mail(email: str, otp: str, expires: int):
 	app_name = frappe.get_website_settings("app_name") or frappe.get_system_settings("app_name") or _("Frappe")
 	minutes = max(1, int(expires / 60))
+	messages_before = len(frappe.local.message_log)
 	try:
 		frappe.sendmail(
 			recipients=email,
@@ -90,10 +91,15 @@ def _send_otp_mail(email: str, otp: str, expires: int):
 		)
 	except Exception:
 		# Same response as for an unknown address; the failure is only logged.
+		# frappe.throw() queues its message before raising, so drop it too, or
+		# the error reaches the browser and shows the address exists (audit M-2).
+		del frappe.local.message_log[messages_before:]
 		frappe.log_error(title="Keyless OTP mail failed", message=frappe.get_traceback())
 
 
 def _home_for(user: str) -> str:
 	if frappe.db.get_value("User", user, "user_type") == "System User":
 		return "/app"
-	return frappe.utils.get_url()
+	# A path, not get_url(): host_name may name another host or port than the
+	# one the person is on, and the browser would leave the site.
+	return "/"

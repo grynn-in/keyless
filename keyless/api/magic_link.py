@@ -111,6 +111,7 @@ def _confirmation_page(key: str, redirect_to: str | None):
 
 def _send_link_mail(email: str, link: str, minutes: int):
 	app_name = frappe.get_website_settings("app_name") or frappe.get_system_settings("app_name") or _("Frappe")
+	messages_before = len(frappe.local.message_log)
 	try:
 		frappe.sendmail(
 			recipients=email,
@@ -123,4 +124,7 @@ def _send_link_mail(email: str, link: str, minutes: int):
 		)
 	except Exception:
 		# Same response as for an unknown address; the failure is only logged.
+		# frappe.throw() queues its message before raising, so drop it too, or
+		# the error reaches the browser and shows the address exists (audit M-2).
+		del frappe.local.message_log[messages_before:]
 		frappe.log_error(title="Keyless magic link mail failed", message=frappe.get_traceback())

@@ -42,9 +42,13 @@ def before_login(login_manager):
 def on_login(login_manager):
 	if not is_enabled():
 		return
-	if frappe.flags.get("keyless_password_login") and not frappe.flags.get("keyless_login"):
-		# Authoritative check on the user Frappe actually authenticated.
-		password_policy.enforce(user=login_manager.user)
+	if not frappe.flags.get("keyless_login"):
+		if frappe.flags.get("keyless_password_login"):
+			# Authoritative check on the user Frappe actually authenticated.
+			password_policy.enforce(user=login_manager.user)
+		elif password_policy.is_password_login_request():
+			# Frappe 15: before_login does not exist, so this is the only check.
+			password_policy.enforce_after_password_check(login_manager)
 	log_event(
 		"session_created",
 		user=getattr(login_manager, "user", None),

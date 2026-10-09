@@ -39,6 +39,7 @@ class TestLoginPageXSS(FrappeTestCase):
 
 	def test_logo_and_app_name_are_escaped(self):
 		hostile = 'Acme"><img src=x onerror=alert(2)>'
+		original = frappe.db.get_single_value("Website Settings", "app_name")
 		frappe.db.set_single_value("Website Settings", "app_name", hostile)
 		try:
 			with (
@@ -51,7 +52,10 @@ class TestLoginPageXSS(FrappeTestCase):
 				html = get_response_content("/keyless/login")
 		finally:
 			frappe.set_user("Administrator")
-			frappe.db.rollback()
+			# keyless_settings() commits, which also commits the hostile app_name,
+			# so a rollback alone would leave it on the site.
+			frappe.db.set_single_value("Website Settings", "app_name", original)
+			frappe.db.commit()
 		self.assertNotIn("<img src=x onerror=alert(2)>", html)
 		self.assertNotIn("<svg onload=alert(3)>", html)
 		self.assertIn("&lt;img src=x onerror=alert(2)&gt;", html)
