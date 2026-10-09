@@ -100,4 +100,6 @@ def _send_otp_mail(email: str, otp: str, expires: int):
 def _home_for(user: str) -> str:
 	if frappe.db.get_value("User", user, "user_type") == "System User":
 		return "/app"
-	return frappe.utils.get_url()
+	# A path, not get_url(): host_name may name another host or port than the
+	# one the person is on, and the browser would leave the site.
+	return "/"
