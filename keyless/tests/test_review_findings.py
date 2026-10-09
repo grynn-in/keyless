@@ -135,6 +135,36 @@ class TestMailedSecretLogins(ReviewCase):
 			client, response = self.redeem(self.reset_key())
 		self.assertEqual(logged_in_user(client), "Guest", response.get_data(as_text=True)[:300])
 
+	def test_reset_link_refused_on_every_route(self):
+		# The method is found from the running code, not the URL (review of #12).
+		routes = {
+			"v2 doctype path": ("/api/v2/method/User/update_password", {}),
+			"cmd overrides path": ("/api/method/ping", {"cmd": "frappe.core.doctype.user.user.update_password"}),
+		}
+		self.set_passwordless_only()
+		for label, (path, extra) in routes.items():
+			with self.subTest(route=label), keyless_settings(**POLICY):
+				client = new_client()
+				response = http(client, "post", path, data={"new_password": NEW_PASSWORD, "key": self.reset_key(), **extra})
+				self.assertEqual(logged_in_user(client), "Guest", response.get_data(as_text=True)[:300])
+
+	def test_signed_in_user_may_change_own_password(self):
+		# update_password with the old password (no key) also calls login_as;
+		# that is not a mailed secret and is not refused.
+		client = new_client()
+		with keyless_settings(**POLICY):
+			api_login(client, PASSWORD)
+			self.assertEqual(logged_in_user(client), USER)
+			self.set_passwordless_only()
+			response = http(
+				client,
+				"post",
+				"/api/method/frappe.core.doctype.user.user.update_password",
+				data={"new_password": NEW_PASSWORD, "old_password": PASSWORD},
+			)
+		self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
+		self.assertEqual(logged_in_user(client), USER)
+
 	def test_reset_link_still_signs_in_when_policy_allows(self):
 		with keyless_settings(**POLICY):
 			client, response = self.redeem(self.reset_key())
@@ -176,6 +206,23 @@ class TestMailWorkAfterResponse(ReviewCase):
 			callbacks.run()
 			self.assertEqual(sendmail.call_count, 1)
 			self.assertEqual(sendmail.call_args.kwargs["recipients"], USER)
+
+
+class TestDeferredMailFailure(ReviewCase):
+	TITLE = "Keyless deferred sign-in mail failed"
+
+	def test_failure_after_response_is_logged(self):
+		frappe.db.delete("Error Log", {"method": self.TITLE})
+		frappe.db.commit()
+		set_request(method="POST", path="/api/method/keyless.api.otp.request_otp")
+		frappe.local.request.after_response = callbacks = CallbackManager()
+		with patch.object(otp, "store_otp", side_effect=RuntimeError("redis down")):
+			common.after_response(lambda: otp._deliver_otp(USER, 300, 6))
+			callbacks.run()
+		frappe.db.rollback()
+		self.assertTrue(frappe.db.exists("Error Log", {"method": self.TITLE}))
+		frappe.db.delete("Error Log", {"method": self.TITLE})
+		frappe.db.commit()
 
 
 class TestPasskeyOriginWarning(FrappeTestCase):

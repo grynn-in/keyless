@@ -5,12 +5,19 @@ Frappe performs username/password login inside `LoginManager()` itself
 method runs, so the policy is enforced from the `before_login` and
 `on_login` hooks, which run on every password path (audit C-2).
 
-Frappe 15 has no `before_login` hook. There the policy runs from `on_login`,
-after the password has been checked, and a blocked login is refused exactly
-as a wrong password is, so the response still never confirms a password.
+Frappe 15 has no `before_login` hook; `keyless.compat` adds it. Until that
+patch is in place in a worker process, `on_login` checks password logins
+after the password check and refuses a blocked one exactly as a wrong
+password is refused.
+
+Password reset links and Frappe's email-link login also create sessions
+(through `login_as`); `enforce_mailed_login` holds them to the rules.
 """
 
 from __future__ import annotations
+
+import inspect
+import sys
 
 import frappe
 from frappe import _
@@ -110,22 +117,37 @@ def block_oauth_password_grant() -> None:
 	enforce(login_name=form.get("username"), method="oauth_password")
 
 
-# Frappe methods that create a session from a mailed secret: the password
-# reset link (update_password with a key, also reached from an expired
-# password) and Frappe's own "login with email link".
-RESET_METHOD = "frappe.core.doctype.user.user.update_password"
-EMAIL_LINK_METHOD = "frappe.www.login.login_via_key"
-API_METHOD_PREFIXES = ("/api/method/", "/api/v1/method/", "/api/v2/method/")
+def _caller_frame(func):
+	"""The frame of `func` if it is on the current call stack, else None.
+
+	Used instead of the request's URL or `cmd`: Frappe reaches the same
+	method through /api/method, /api/v1, /api/v2 (including doctype paths
+	such as /api/v2/method/User/update_password) and a `cmd` field that
+	overrides the path, so only the running code says which one it is
+	(review of #12).
+	"""
+	code = inspect.unwrap(func).__code__
+	frame = sys._getframe(2)
+	while frame is not None:
+		if frame.f_code is code:
+			return frame
+		frame = frame.f_back
+	return None
 
 
-def called_method() -> str:
-	"""Dotted name of the whitelisted method this request calls, or ""."""
-	request = getattr(frappe.local, "request", None)
-	path = (getattr(request, "path", "") or "").rstrip("/")
-	for prefix in API_METHOD_PREFIXES:
-		if path.startswith(prefix):
-			return path[len(prefix) :]
-	return frappe.form_dict.get("cmd") or ""
+def mailed_login_source() -> str | None:
+	"""Which Frappe flow is creating this session from a mailed secret:
+	"reset_link" (update_password with a reset key, also reached from an
+	expired password), "email_link" (Frappe's own email-link login), or None."""
+	from frappe.core.doctype.user.user import update_password
+	from frappe.www.login import login_via_key
+
+	frame = _caller_frame(update_password)
+	if frame is not None and frame.f_locals.get("key"):
+		return "reset_link"
+	if _caller_frame(login_via_key) is not None:
+		return "email_link"
+	return None
 
 
 def enforce_mailed_login(user: str) -> None:
@@ -140,19 +162,23 @@ def enforce_mailed_login(user: str) -> None:
 	login_as before the session exists, and the request (including the new
 	password) is rolled back.
 	"""
-	method = called_method()
-	if method not in (RESET_METHOD, EMAIL_LINK_METHOD) or not is_enabled():
+	if not is_enabled():
+		return
+	source = mailed_login_source()
+	if source is None:
+		# Includes a signed-in user changing their own password with the old
+		# one: update_password also calls login_as then (review of #12).
 		return
 	settings = get_settings()
 	reason = email_factor_refusal(user)
-	if method == RESET_METHOD:
+	if source == "reset_link":
 		if reason == "frappe_2fa":
 			reason = None
 		if not reason and password_blocked(user, settings, frappe_2fa_runs=False):
 			reason = "password_blocked"
 	if not reason:
 		return
-	log_event("factor_blocked", user=user, method=method.rsplit(".", 1)[-1], success=False, detail=reason)
+	log_event("factor_blocked", user=user, method=source, success=False, detail=reason)
 	frappe.throw(_("Sign in with a passkey."), frappe.AuthenticationError)
 
 

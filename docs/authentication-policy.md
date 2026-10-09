@@ -24,7 +24,8 @@ Frappe signs a user in with a password on these paths, and Keyless enforces the 
 | OAuth2 token endpoint with `grant_type=password` (see section 2) | yes |
 
 Frappe's **password reset link** (from "Forgot password", or from an expired password) signs the
-person in once the new password is set. That session follows the password rules: if password login
+person in once the new password is set, on every route Frappe accepts it. A signed-in user changing
+their own password with the old one is not affected. That session follows the password rules: if password login
 is blocked for the user, or the user is a System User under **Require a Passkey for System Users**,
 the reset is refused with *"Sign in with a passkey."* and nothing changes. It is **not** refused for
 users Frappe 2FA applies to, so they can still recover a forgotten password, even though Frappe's
@@ -73,9 +74,11 @@ Rules are checked in this order; the first that matches wins.
 **On Frappe 15**, which has no `before_login` trigger, Keyless adds the one call Frappe 16 makes
 at the start of `LoginManager.login()` (`keyless/compat.py`), so the rules above hold there too:
 the policy runs before the password is checked. The patch is in place once a worker process has
-imported Keyless, which its first Keyless hook does. Until then, `on_login` checks the password
-login instead, after the password check: a blocked login then gets Frappe's *"Invalid login
-credentials"*, the same response as a wrong password.
+imported Keyless, which its first Keyless hook does; on most workers that is the first request.
+Until then, `on_login` checks the password login instead, after the password check: a blocked login
+then gets Frappe's *"Invalid login credentials"*, the same response as a wrong password. One gap
+remains for that first request only: a correct but **expired** password gets Frappe's "Password
+Reset" answer, which shows the password was right. The reset link it carries is still refused.
 
 ### Frappe's own "Disable Username/Password Login"
 

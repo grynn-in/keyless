@@ -143,5 +143,7 @@ def after_response(fn) -> None:
 		except Exception:
 			frappe.db.rollback()
 			frappe.log_error(title="Keyless deferred sign-in mail failed", message=frappe.get_traceback())
+			# Nothing commits after an after_response callback, so commit the log row.
+			frappe.db.commit()
 
 	callbacks.add(run)
