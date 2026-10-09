@@ -85,6 +85,31 @@ def allowed_origins() -> list[str]:
 	return origins
 
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def passkey_origin_warning(extra_origins: str | None = None) -> str | None:
+	"""A warning when no accepted passkey origin is https, else None.
+
+	The site origin comes from configuration only (audit H-5). Behind a proxy
+	that terminates TLS, without host_name or ssl_certificate in site_config,
+	it is http:// while browsers send https://, and every passkey ceremony
+	fails with "Could not verify this passkey" (code review of #7).
+	`extra_origins` is the Allowed Origins text being saved, if any.
+	"""
+	extra = (get_settings().allowed_origins or "") if extra_origins is None else extra_origins
+	origins = [site_origin()] + [line.strip().rstrip("/") for line in extra.splitlines() if line.strip()]
+	if any(origin.startswith("https://") for origin in origins):
+		return None
+	if (urlsplit(origins[0]).hostname or "") in LOCAL_HOSTS:
+		return None
+	return _(
+		"Passkeys are accepted only from {0}. If people reach this site over https, for example "
+		"through a proxy that terminates TLS, set host_name in site_config to the https URL or add "
+		"the https origin to Allowed Origins; otherwise passkey sign-in fails."
+	).format(", ".join(origins))
+
+
 def rp_id() -> str:
 	"""The configured RP ID, else the configured site's hostname. Never a request header."""
 	settings = get_settings()
@@ -96,3 +121,27 @@ def rp_id() -> str:
 def rp_name() -> str:
 	settings = get_settings()
 	return settings.rp_name or frappe.get_website_settings("app_name") or "Frappe"
+
+
+def after_response(fn) -> None:
+	"""Run fn after the response has been sent, in a transaction of its own.
+
+	Used for the work that depends on whether an account exists (creating and
+	mailing a code or link), so a known and an unknown address take the same
+	time to answer (code review of #7). Outside a live request (tests, console,
+	jobs) fn runs at once, in the caller's transaction.
+	"""
+	callbacks = getattr(getattr(frappe.local, "request", None), "after_response", None)
+	if callbacks is None:
+		fn()
+		return
+
+	def run():
+		try:
+			fn()
+			frappe.db.commit()
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(title="Keyless deferred sign-in mail failed", message=frappe.get_traceback())
+
+	callbacks.add(run)

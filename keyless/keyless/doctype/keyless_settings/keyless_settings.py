@@ -59,6 +59,12 @@ class KeylessSettings(Document):
 			self.rp_id = host
 		if self.allowed_origins:
 			self.allowed_origins = "\n".join(self._clean_origins(self.allowed_origins))
+		if self.enabled and self.enable_passkeys:
+			from keyless.api.common import passkey_origin_warning
+
+			warning = passkey_origin_warning(self.allowed_origins or "")
+			if warning:
+				frappe.msgprint(warning, title=_("Check passkey origins"), indicator="orange")
 		if self.disable_password_login and not (
 			self.enable_passkeys or self.enable_magic_link or self.enable_email_otp
 		):

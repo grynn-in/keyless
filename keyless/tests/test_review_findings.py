@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import frappe
 from frappe.auth import LoginManager
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, today
+from frappe.utils import CallbackManager, add_days, set_request, today
 
+from keyless.api import common, otp, passkey
 from keyless.tests.security_utils import (
 	PASSWORD,
 	delete_user,
@@ -137,3 +139,53 @@ class TestMailedSecretLogins(ReviewCase):
 		with keyless_settings(**POLICY):
 			client, response = self.redeem(self.reset_key())
 		self.assertEqual(logged_in_user(client), USER, response.get_data(as_text=True)[:300])
+
+
+class TestStepUpUserHandle(FrappeTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.handle = frappe.db.get_value("User", "Administrator", "keyless_user_handle")
+		if not self.handle:
+			self.skipTest("Administrator has no WebAuthn user handle")
+		self.key = SimpleNamespace(user="Administrator", user_handle=self.handle)
+
+	def test_missing_handle_refused_for_sign_in(self):
+		cred = {"response": {}}
+		self.assertFalse(passkey._user_handle_matches(cred, self.key))
+
+	def test_missing_handle_accepted_for_step_up(self):
+		cred = {"response": {}}
+		self.assertTrue(passkey._user_handle_matches(cred, self.key, required=False))
+
+	def test_wrong_handle_refused_for_step_up(self):
+		cred = {"response": {"userHandle": "AAAA"}}
+		self.assertFalse(passkey._user_handle_matches(cred, self.key, required=False))
+
+
+class TestMailWorkAfterResponse(ReviewCase):
+	def test_code_is_created_only_after_the_response(self):
+		set_request(method="POST", path="/api/method/keyless.api.otp.request_otp")
+		frappe.local.request.after_response = callbacks = CallbackManager()
+		frappe.local.request_ip = "127.0.0.1"
+		frappe.local.form_dict = frappe._dict(cmd="keyless.api.otp.request_otp", email=USER)
+		settings = {**POLICY, "enable_email_otp": 1, "hide_user_enumeration": 1, "require_passkey_for_system_users": 0}
+		with keyless_settings(**settings), patch("frappe.sendmail") as sendmail:
+			for email in (USER, "kl-review-nobody@example.com"):
+				self.assertEqual(otp.request_otp(email)["ok"], True)
+			sendmail.assert_not_called()
+			callbacks.run()
+			self.assertEqual(sendmail.call_count, 1)
+			self.assertEqual(sendmail.call_args.kwargs["recipients"], USER)
+
+
+class TestPasskeyOriginWarning(FrappeTestCase):
+	def test_warns_when_no_origin_is_https(self):
+		with patch.object(common, "site_origin", return_value="http://erp.example.com"):
+			self.assertIn("http://erp.example.com", common.passkey_origin_warning(""))
+			self.assertIsNone(common.passkey_origin_warning("https://erp.example.com"))
+		with patch.object(common, "site_origin", return_value="https://erp.example.com"):
+			self.assertIsNone(common.passkey_origin_warning(""))
+
+	def test_local_development_is_not_warned(self):
+		with patch.object(common, "site_origin", return_value="http://localhost:8000"):
+			self.assertIsNone(common.passkey_origin_warning(""))
