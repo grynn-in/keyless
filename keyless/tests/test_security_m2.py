@@ -115,6 +115,28 @@ class TestEmailFactors(EnumerationCase):
 				known, unknown = self._both(fn, cmd)
 				self.assertEqual(known, unknown)
 
+	def test_mail_failure_message_does_not_reach_the_client(self):
+		# Frappe fails through frappe.throw(), which queues the message for the
+		# response before raising; catching the exception alone still leaks it.
+		def no_outgoing_account(*args, **kwargs):
+			frappe.throw("Please setup default outgoing Email Account", frappe.OutgoingEmailError)
+
+		for fn, cmd in (
+			(otp.request_otp, "keyless.api.otp.request_otp"),
+			(magic_link.send_link, "keyless.api.magic_link.send_link"),
+		):
+			with (
+				self.subTest(cmd=cmd),
+				keyless_settings(**ALL_ON),
+				patch("frappe.sendmail", side_effect=no_outgoing_account),
+			):
+				seen = []
+				for email in (NO_PASSKEY, UNKNOWN):
+					frappe.clear_messages()
+					seen.append((self.call(fn, cmd, email=email), list(frappe.local.message_log)))
+				self.assertEqual(seen[0], seen[1])
+				self.assertEqual(seen[0][1], [])
+
 	def test_mail_is_queued_not_sent_inline(self):
 		for fn, cmd in (
 			(otp.request_otp, "keyless.api.otp.request_otp"),
