@@ -54,8 +54,10 @@ Frappe takes the client IP from the first `X-Forwarded-For` value. Configure the
 proxy in front of Frappe to **overwrite** that header with the real client address
 (nginx: `proxy_set_header X-Forwarded-For $remote_addr;`), never to append to a value
 the client sent. Otherwise clients can choose their own IP, which defeats every per-IP
-limit and pollutes the audit log. Keyless's per-account limits on sign-in codes do not
-depend on the IP, but its per-IP limits and Frappe's do.
+limit and pollutes the audit log. Keyless's per-account limits count per address and IP
+with an account-wide backstop, and its limit on wrong sign-in codes does not depend on the
+IP at all, so a spoofed IP gains at most the backstop; its per-IP limits and Frappe's
+depend on the IP entirely.
 
 Magic-link keys travel in the query string, so also keep `key=` out of proxy access logs.
 

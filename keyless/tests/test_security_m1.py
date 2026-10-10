@@ -1,5 +1,9 @@
 """M-1: OTP rate limits must hold per account, whatever the client IP, and the
-attempt counter must be atomic, survive re-issue and not extend a code's life."""
+attempt counter must be atomic, survive re-issue and not extend a code's life.
+
+Code requests are limited per address and IP, with an account-wide backstop of
+ACCOUNT_BACKSTOP_FACTOR times the limit (so a stranger cannot lock the owner out);
+wrong guesses are limited per address only (code review of #7)."""
 
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ from frappe.utils import set_request
 
 from keyless import tokens
 from keyless.api import otp
+from keyless.api.common import ACCOUNT_BACKSTOP_FACTOR
 from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
 
 USER = "kl-m1-user@example.com"
@@ -60,9 +65,9 @@ class OTPCase(FrappeTestCase):
 		self.ip += 1
 		return f"203.0.113.{self.ip % 250 + 1}"
 
-	def request(self, email=USER):
+	def request(self, email=USER, ip=None):
 		set_request(method="POST", path="/api/method/keyless.api.otp.request_otp")
-		frappe.local.request_ip = self._new_ip()
+		frappe.local.request_ip = ip or self._new_ip()
 		frappe.local.form_dict = frappe._dict(cmd="keyless.api.otp.request_otp", email=email)
 		return otp.request_otp(email)
 
@@ -74,16 +79,35 @@ class OTPCase(FrappeTestCase):
 
 
 class TestPerAccountLimits(OTPCase):
-	def test_request_limit_holds_across_ips_and_spellings(self):
+	def test_request_limit_per_ip_holds_across_spellings(self):
 		for target in (USER, "kl-m1-nobody@example.com"):
 			with self.subTest(target=target):
 				reset_rate_limits()
 				with keyless_settings(**OTP_ON):
 					spellings = [target, target.upper(), f"  {target} "]
 					for i in range(5):
+						self.request(spellings[i % 3], ip="198.51.100.1")
+					with self.assertRaises(frappe.RateLimitExceededError):
+						self.request(target, ip="198.51.100.1")
+
+	def test_request_backstop_holds_across_ips_and_spellings(self):
+		for target in (USER, "kl-m1-nobody@example.com"):
+			with self.subTest(target=target):
+				reset_rate_limits()
+				with keyless_settings(**{**OTP_ON, "otp_daily_limit": 1000}):
+					spellings = [target, target.upper(), f"  {target} "]
+					for i in range(5 * ACCOUNT_BACKSTOP_FACTOR):
 						self.request(spellings[i % 3])
 					with self.assertRaises(frappe.RateLimitExceededError):
 						self.request(target)
+
+	def test_stranger_cannot_lock_out_the_owner(self):
+		with keyless_settings(**OTP_ON):
+			for _ in range(5):
+				self.request(ip="198.51.100.66")
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self.request(ip="198.51.100.66")
+			self.assertTrue(self.request(ip="192.0.2.10")["ok"])
 
 	def test_verify_limit_holds_across_ips(self):
 		with keyless_settings(**{**OTP_ON, "max_otp_attempts": 10}):
@@ -111,11 +135,23 @@ class TestPerAccountLimits(OTPCase):
 				self.verify(self.sent[-1])
 
 	def test_daily_issue_cap(self):
-		with keyless_settings(**{**OTP_ON, "rate_limit_per_hour": 50, "otp_daily_limit": 3}):
+		with keyless_settings(**{**OTP_ON, "rate_limit_per_hour": 500, "otp_daily_limit": 3}):
 			for _ in range(3):
+				self.request(ip="198.51.100.1")
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self.request(ip="198.51.100.1")
+			for _ in range(3 * ACCOUNT_BACKSTOP_FACTOR - 3):
 				self.request()
 			with self.assertRaises(frappe.RateLimitExceededError):
 				self.request()
+
+	def test_correct_codes_do_not_use_up_the_guess_budget(self):
+		# max_otp_attempts 3 allows 6 guesses an hour; successful sign-ins are given back.
+		with keyless_settings(**{**OTP_ON, "rate_limit_per_hour": 50}):
+			for _ in range(8):
+				self.request()
+				self.verify(self.sent[-1])
+		self.assertEqual(otp.issue_session.call_count, 8)
 
 	def test_normal_sign_in_still_works(self):
 		with keyless_settings(**OTP_ON):
