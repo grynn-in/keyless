@@ -25,6 +25,8 @@ unless the site has `allow_tests` set.
 bench new-site e2e.localhost
 bench --site e2e.localhost install-app keyless
 bench --site e2e.localhost set-config allow_tests true
+bench --site e2e.localhost set-config host_name http://e2e.localhost:8000
+bench --site e2e.localhost set-config mute_emails 1
 bench build --app keyless
 bench serve --port 8000          # in another terminal
 
@@ -37,7 +39,8 @@ node run.js
 A `*.localhost` site name resolves to your machine in Chromium, so no hosts-file entry is
 needed. Mail is not sent: the suite sets `mute_emails` and reads codes and links from the
 Email Queue. It also sets `host_name` and Keyless's Allowed Origins to the URL it tests, so
-emailed links and passkeys use the right host and port.
+emailed links and passkeys use the right host and port. Set `host_name` and `mute_emails`
+before starting the server, as above: a running server may not reread site_config at once.
 
 Settings, all optional:
 

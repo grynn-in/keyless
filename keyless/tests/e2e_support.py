@@ -120,9 +120,15 @@ def last_mail(recipient: str) -> dict:
 
 
 def recent_errors(limit: int = 5) -> list[str]:
-	"""Titles of the newest Error Log entries, to explain a step that failed."""
+	"""The newest Error Log entries (title and last traceback line), to explain a failed step."""
 	_require_test_site()
-	return frappe.get_all("Error Log", fields=["method"], order_by="creation desc", limit=limit, pluck="method")
+	rows = frappe.get_all("Error Log", fields=["method", "error"], order_by="creation desc", limit=limit)
+	return [f"{row.method}: {_last_line(row.error)}"[:300] for row in rows]
+
+
+def _last_line(text: str | None) -> str:
+	lines = (text or "").strip().splitlines()
+	return lines[-1] if lines else ""
 
 
 def clear_step_up() -> bool:
