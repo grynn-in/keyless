@@ -29,7 +29,8 @@
       "label": "User",
       "options": "User",
       "reqd": 1,
-      "search_index": 1
+      "search_index": 1,
+      "set_only_once": 1
     },
     {
       "fieldname": "friendly_name",
@@ -71,14 +72,16 @@
       "label": "Credential ID",
       "length": 255,
       "reqd": 1,
-      "unique": 1
+      "unique": 1,
+      "set_only_once": 1
     },
     {
       "fieldname": "public_key",
       "fieldtype": "Long Text",
       "label": "Public Key",
       "read_only": 1,
-      "reqd": 1
+      "reqd": 1,
+      "set_only_once": 1
     },
     {
       "default": "0",
@@ -97,7 +100,8 @@
       "fieldname": "user_handle",
       "fieldtype": "Data",
       "label": "User Handle",
-      "read_only": 1
+      "read_only": 1,
+      "set_only_once": 1
     },
     {
       "fieldname": "transports",
@@ -108,7 +112,7 @@
   ],
   "index_web_pages_for_search": 0,
   "links": [],
-  "modified": "2026-10-03 12:00:00.000000",
+  "modified": "2026-10-07 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Keyless",
   "name": "User Passkey",
@@ -120,14 +124,6 @@
       "delete": 1,
       "read": 1,
       "role": "System Manager",
-      "write": 1
-    },
-    {
-      "create": 1,
-      "delete": 1,
-      "if_owner": 1,
-      "read": 1,
-      "role": "All",
       "write": 1
     }
   ],

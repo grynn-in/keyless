@@ -13,17 +13,31 @@ import secrets
 from typing import Any
 
 import frappe
+from frappe import _
 from frappe.utils import cint, now_datetime
+from frappe.utils.password import get_encryption_key
 
 
 OTP_CACHE_PREFIX = "keyless:otp:"
 MAGIC_CACHE_PREFIX = "keyless:magic:"
 CHALLENGE_CACHE_PREFIX = "keyless:challenge:"
 LOCK_CACHE_PREFIX = "keyless:lock:"
+ATTEMPTS_CACHE_PREFIX = "keyless:otp-attempts:"
+RATE_CACHE_PREFIX = "keyless:rl:"
 
 
 def _pepper() -> str:
-	return str(frappe.local.conf.get("encryption_key") or frappe.local.conf.get("secret_key") or "")
+	"""The site's encryption_key, never secret_key or an empty pepper (audit I-1).
+	A new site has none until something first encrypts a value; Frappe's own helper then
+	creates and saves one, as it does for encrypted passwords.
+	Rotating encryption_key invalidates every stored backup code."""
+	key = get_encryption_key()
+	if not key:
+		frappe.throw(
+			_("Keyless needs encryption_key in site_config.json before it can issue or check codes."),
+			title=_("Keyless is not configured"),
+		)
+	return str(key)
 
 
 def digest(value: str) -> str:
@@ -60,46 +74,93 @@ def cache_delete(prefix: str, key: str) -> None:
 	frappe.cache.delete_value(f"{prefix}{key}")
 
 
+def _raw_key(name: str) -> bytes:
+	return frappe.cache.make_key(name)
+
+
 def store_otp(email: str, otp: str, expires_in_sec: int) -> None:
+	cache_set(OTP_CACHE_PREFIX, email, {"digest": digest(otp), "created": str(now_datetime())}, expires_in_sec)
+	# Attempts live in their own counter so they can be incremented atomically
+	# (INCR) without rewriting the code, whose TTL must not change (audit M-1).
+	frappe.cache.setex(_raw_key(ATTEMPTS_CACHE_PREFIX + email), expires_in_sec, 0)
+
+
+def verify_and_consume_otp(email: str, otp: str, max_attempts: int = 5) -> bool:
+	if not cache_get(OTP_CACHE_PREFIX, email):
+		return False
+	attempts_key = _raw_key(ATTEMPTS_CACHE_PREFIX + email)
+	attempts = frappe.cache.incrby(attempts_key, 1)
+	if attempts == 1 and frappe.cache.ttl(attempts_key) < 0:
+		# Counter vanished (e.g. evicted) while the code lives: expire it with the code.
+		frappe.cache.expire(attempts_key, max(1, frappe.cache.ttl(_raw_key(OTP_CACHE_PREFIX + email))))
+	if attempts > max_attempts:
+		# Delete the code but keep the counter, so requests already past the check
+		# above keep counting instead of starting a fresh counter.
+		frappe.cache.delete(_raw_key(OTP_CACHE_PREFIX + email))
+		cache_delete(OTP_CACHE_PREFIX, email)
+		return False
+	if not compare(otp.strip(), (cache_get(OTP_CACHE_PREFIX, email) or {}).get("digest") or ""):
+		return False
+	# Only the request that actually deletes the code wins, so one code gives one session.
+	return _delete_otp(email)
+
+
+def _delete_otp(email: str) -> bool:
+	deleted = frappe.cache.delete(_raw_key(OTP_CACHE_PREFIX + email))
+	frappe.cache.delete(_raw_key(ATTEMPTS_CACHE_PREFIX + email))
+	cache_delete(OTP_CACHE_PREFIX, email)
+	return bool(deleted)
+
+
+def count_hit(bucket: str, identity: str, window_sec: int) -> int:
+	"""Atomically count one event for `identity` in a fixed window; return the count.
+
+	Identities (e.g. email addresses) are stored as digests, never in clear.
+	"""
+	key = _raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")
+	count = frappe.cache.incrby(key, 1)
+	if count == 1:
+		frappe.cache.expire(key, window_sec)
+	return count
+
+
+def hit_count(bucket: str, identity: str) -> int:
+	return cint(frappe.cache.get(_raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")))
+
+
+def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str | None = None) -> None:
+	# Key is unguessable; value is the bound email and post-login target, kept
+	# server-side so the emailed URL cannot be edited to point elsewhere.
 	cache_set(
-		OTP_CACHE_PREFIX,
-		email,
-		{
-			"digest": digest(otp),
-			"attempts": 0,
-			"created": str(now_datetime()),
-		},
+		MAGIC_CACHE_PREFIX,
+		key,
+		{"email": email, "redirect_to": redirect_to, "created": str(now_datetime())},
 		expires_in_sec,
 	)
 
 
-def verify_and_consume_otp(email: str, otp: str, max_attempts: int = 5) -> bool:
-	payload = cache_get(OTP_CACHE_PREFIX, email)
-	if not payload:
-		return False
-	attempts = cint(payload.get("attempts")) + 1
-	payload["attempts"] = attempts
-	if attempts > max_attempts:
-		cache_delete(OTP_CACHE_PREFIX, email)
-		return False
-	if not compare(otp.strip(), payload.get("digest") or ""):
-		cache_set(OTP_CACHE_PREFIX, email, payload, expires_in_sec=300)
-		return False
-	cache_delete(OTP_CACHE_PREFIX, email)
-	return True
+def peek_magic_link(key: str) -> bool:
+	"""Whether a magic-link key is still valid, without using it up."""
+	return bool(key) and cache_get(MAGIC_CACHE_PREFIX, key) is not None
 
 
-def store_magic_key(key: str, email: str, expires_in_sec: int) -> None:
-	# Key is unguessable; value is the bound email. Consume on first GET.
-	cache_set(MAGIC_CACHE_PREFIX, key, {"email": email, "created": str(now_datetime())}, expires_in_sec)
+def consume_magic_link(key: str) -> dict[str, Any] | None:
+	"""Return and delete the stored payload ({"email", "redirect_to", ...})."""
+	return _take(MAGIC_CACHE_PREFIX, key)
+
+
+def _take(prefix: str, key: str) -> dict[str, Any] | None:
+	"""Read and delete a one-shot value. Only the caller whose DELETE removed it gets
+	it, so parallel requests cannot both use the same link or challenge."""
+	payload = cache_get(prefix, key)
+	deleted = frappe.cache.delete(_raw_key(f"{prefix}{key}"))
+	cache_delete(prefix, key)
+	return payload if payload and deleted else None
 
 
 def consume_magic_key(key: str) -> str | None:
-	payload = cache_get(MAGIC_CACHE_PREFIX, key)
-	cache_delete(MAGIC_CACHE_PREFIX, key)
-	if not payload:
-		return None
-	return payload.get("email")
+	payload = consume_magic_link(key)
+	return payload.get("email") if payload else None
 
 
 def store_challenge(challenge_id: str, payload: dict[str, Any], expires_in_sec: int = 300) -> None:
@@ -107,6 +168,4 @@ def store_challenge(challenge_id: str, payload: dict[str, Any], expires_in_sec: 
 
 
 def consume_challenge(challenge_id: str) -> dict[str, Any] | None:
-	payload = cache_get(CHALLENGE_CACHE_PREFIX, challenge_id)
-	cache_delete(CHALLENGE_CACHE_PREFIX, challenge_id)
-	return payload
+	return _take(CHALLENGE_CACHE_PREFIX, challenge_id)

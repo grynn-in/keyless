@@ -25,7 +25,6 @@ def public_config() -> dict:
 		"enable_magic_link": bool(s.enable_magic_link),
 		"enable_email_otp": bool(s.enable_email_otp),
 		"enable_backup_codes": bool(s.enable_backup_codes),
-		"allow_passwordless_signup": bool(s.allow_passwordless_signup),
 		"otp_length": int(s.otp_length or 6),
 		"replace_standard_login": bool(s.replace_standard_login),
 		"login_route": "/keyless/login",

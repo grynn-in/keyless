@@ -7,13 +7,15 @@ first. Credential public keys live on User Passkey; challenges live in Redis.
 
 from __future__ import annotations
 
+import hmac
 import json
 
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from keyless.api.common import client_origin, get_rate_limit, rp_id, rp_name, require_enabled
+from keyless import notify, stepup
+from keyless.api.common import allowed_origins, get_passkey_ip_rate_limit, require_enabled, rp_id, rp_name
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.tokens import consume_challenge, random_token, store_challenge
@@ -30,6 +32,36 @@ def _uv_requirement(settings):
 		"discouraged": UserVerificationRequirement.DISCOURAGED,
 	}
 	return mapping.get(value, UserVerificationRequirement.REQUIRED)
+
+
+def _handle_bytes(handle: str) -> bytes:
+	"""The WebAuthn user.id we registered for a stored keyless_user_handle."""
+	return bytes.fromhex(handle) if len(handle) == 32 else handle.encode("utf-8")
+
+
+def _user_handle_matches(cred: dict, passkey, *, required: bool = True) -> bool:
+	"""The assertion's userHandle must be the registered handle of passkey.user.
+
+	Sign-in uses discoverable credentials, for which authenticators always
+	return userHandle, so a missing one is a mismatch there. Step-up names the
+	credentials in allowCredentials, and CTAP2 authenticators may then omit
+	userHandle when only one matches; with `required=False` a missing handle
+	is accepted (the challenge already binds the session user), a wrong one
+	never is.
+	"""
+	from webauthn.helpers import base64url_to_bytes
+
+	expected = frappe.db.get_value("User", passkey.user, "keyless_user_handle")
+	if not expected or (passkey.user_handle and passkey.user_handle != expected):
+		return False
+	asserted = ((cred.get("response") or {}).get("userHandle") or "").strip()
+	if not asserted:
+		return not required
+	try:
+		asserted_bytes = base64url_to_bytes(asserted)
+	except Exception:
+		return False
+	return hmac.compare_digest(asserted_bytes, _handle_bytes(expected))
 
 
 def _challenge_bytes(stored) -> bytes:
@@ -82,6 +114,7 @@ def registration_options():
 		frappe.throw(_("Passkeys are disabled"))
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Sign in before registering a passkey"), frappe.PermissionError)
+	stepup.require()
 
 	user = frappe.session.user
 	handle = ensure_user_handle(user)
@@ -99,7 +132,7 @@ def registration_options():
 		rp_id=rp_id(),
 		rp_name=rp_name(),
 		user_name=user,
-		user_id=bytes.fromhex(handle) if len(handle) == 32 else handle.encode("utf-8"),
+		user_id=_handle_bytes(handle),
 		user_display_name=full_name,
 		attestation=AttestationConveyancePreference.NONE,
 		authenticator_selection=AuthenticatorSelectionCriteria(
@@ -121,6 +154,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 	settings = require_enabled()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Sign in before registering a passkey"), frappe.PermissionError)
+	stepup.require()
 
 	challenge = consume_challenge(challenge_id)
 	if not challenge or challenge.get("type") != "registration" or challenge.get("user") != frappe.session.user:
@@ -131,7 +165,7 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 		verification = verify_registration_response(
 			credential=cred,
 			expected_challenge=_challenge_bytes(challenge["challenge"]),
-			expected_origin=client_origin(),
+			expected_origin=allowed_origins(),
 			expected_rp_id=rp_id(),
 			require_user_verification=settings.passkey_user_verification == "required",
 		)
@@ -143,7 +177,8 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 			success=False,
 			detail=str(e)[:140],
 		)
-		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
+		# The library's text stays in the audit log only (audit L-3).
+		frappe.throw(_("Could not verify this passkey."), frappe.AuthenticationError)
 
 	credential_id = bytes_to_base64url(verification.credential_id)
 	if frappe.db.exists("User Passkey", {"credential_id": credential_id}):
@@ -169,59 +204,36 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 	)
 	doc.insert(ignore_permissions=True)
 	log_event("passkey_registered", user=frappe.session.user, method="passkey", success=True)
+	notify.sign_in_methods_changed(
+		frappe.session.user, _('A passkey named "{0}" was added to your account.').format(doc.friendly_name)
+	)
 	return {"ok": True, "name": doc.name, "friendly_name": doc.friendly_name}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
-def authentication_options(email: str | None = None):
+@rate_limit(limit=get_passkey_ip_rate_limit, seconds=60 * 60)
+def authentication_options():
+	"""Start a passkey sign-in. Discoverable credentials only: the response never
+	depends on who is signing in, so it cannot reveal which accounts have passkeys
+	(audit M-2, D6)."""
 	from webauthn import generate_authentication_options
-	from webauthn.helpers import base64url_to_bytes
-	from webauthn.helpers.structs import PublicKeyCredentialDescriptor
 
 	settings = require_enabled()
 	if not settings.enable_passkeys:
 		frappe.throw(_("Passkeys are disabled"))
 
-	allow_credentials = None
-	user = None
-	if email:
-		from keyless.user import resolve_enabled_user
-
-		user = resolve_enabled_user(email)
-		if user:
-			rows = frappe.get_all("User Passkey", filters={"user": user}, fields=["credential_id"])
-			allow_credentials = []
-			for row in rows:
-				try:
-					allow_credentials.append(PublicKeyCredentialDescriptor(id=base64url_to_bytes(row.credential_id)))
-				except Exception:
-					continue
-
-	options = generate_authentication_options(
-		rp_id=rp_id(),
-		user_verification=_uv_requirement(settings),
-		allow_credentials=allow_credentials or None,
-	)
-	_challenge_id, payload = _store_options_challenge(options, kind="authentication", user=user)
+	options = generate_authentication_options(rp_id=rp_id(), user_verification=_uv_requirement(settings))
+	_challenge_id, payload = _store_options_challenge(options, kind="authentication", user=None)
 	return payload
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
-def verify_authentication(credential: str | dict, challenge_id: str):
+def verify_assertion(credential: str | dict, challenge: dict, settings):
+	"""Verify a passkey assertion against a consumed challenge and return the
+	User Passkey row (name, user). Used by sign-in and by step-up (audit M-3).
+	If the challenge names a user, the passkey must belong to that user."""
 	from webauthn import verify_authentication_response
 	from webauthn.helpers import base64url_to_bytes
 	from webauthn.helpers.exceptions import InvalidAuthenticationResponse, WebAuthnException
-
-	settings = require_enabled()
-	if not settings.enable_passkeys:
-		frappe.throw(_("Passkeys are disabled"))
-
-	challenge = consume_challenge(challenge_id)
-	if not challenge or challenge.get("type") != "authentication":
-		log_event("passkey_failed", method="passkey", success=False, detail="no_challenge")
-		frappe.throw(_("Sign-in challenge expired"), frappe.AuthenticationError)
 
 	cred = json.loads(credential) if isinstance(credential, str) else credential
 	raw_id = cred.get("id") or cred.get("rawId")
@@ -231,7 +243,7 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 	passkey = frappe.db.get_value(
 		"User Passkey",
 		{"credential_id": raw_id},
-		["name", "user", "public_key", "sign_count"],
+		["name", "user", "public_key", "sign_count", "user_handle"],
 		as_dict=True,
 	)
 	if not passkey:
@@ -241,11 +253,15 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 	if challenge.get("user") and challenge["user"] != passkey.user:
 		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
 
+	if not _user_handle_matches(cred, passkey, required=challenge.get("type") != "stepup"):
+		log_event("passkey_failed", method="passkey", success=False, detail="user_handle_mismatch")
+		frappe.throw(_("Passkey does not match this account"), frappe.AuthenticationError)
+
 	try:
 		verification = verify_authentication_response(
 			credential=cred,
 			expected_challenge=_challenge_bytes(challenge["challenge"]),
-			expected_origin=client_origin(),
+			expected_origin=allowed_origins(),
 			expected_rp_id=rp_id(),
 			credential_public_key=base64url_to_bytes(passkey.public_key),
 			credential_current_sign_count=int(passkey.sign_count or 0),
@@ -253,7 +269,13 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		)
 	except (InvalidAuthenticationResponse, WebAuthnException) as e:
 		log_event("passkey_failed", method="passkey", success=False, detail=str(e)[:140])
-		frappe.throw(_("Could not verify this passkey: {0}").format(str(e)), frappe.AuthenticationError)
+		# The library's text stays in the audit log only (audit L-3).
+		frappe.throw(_("Could not verify this passkey."), frappe.AuthenticationError)
+
+	# Refuse disabled users before recording anything about the assertion (audit I-1).
+	if not frappe.db.get_value("User", passkey.user, "enabled"):
+		log_event("passkey_failed", user=passkey.user, method="passkey", success=False, detail="user_disabled")
+		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
 
 	frappe.db.set_value(
 		"User Passkey",
@@ -264,10 +286,22 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 		},
 		update_modified=False,
 	)
+	return passkey
 
-	if not frappe.db.get_value("User", passkey.user, "enabled"):
-		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
 
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=get_passkey_ip_rate_limit, seconds=60 * 60)
+def verify_authentication(credential: str | dict, challenge_id: str):
+	settings = require_enabled()
+	if not settings.enable_passkeys:
+		frappe.throw(_("Passkeys are disabled"))
+
+	challenge = consume_challenge(challenge_id)
+	if not challenge or challenge.get("type") != "authentication":
+		log_event("passkey_failed", method="passkey", success=False, detail="no_challenge")
+		frappe.throw(_("Sign-in challenge expired"), frappe.AuthenticationError)
+
+	passkey = verify_assertion(credential, challenge, settings)
 	issue_session(passkey.user, method="passkey")
 	home = "/app" if frappe.db.get_value("User", passkey.user, "user_type") == "System User" else "/"
 	return {"ok": True, "user": passkey.user, "home": home}
@@ -276,7 +310,7 @@ def verify_authentication(credential: str | dict, challenge_id: str):
 @frappe.whitelist()
 def list_passkeys():
 	if frappe.session.user == "Guest":
-		frappe.throw(frappe.PermissionError)
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	return frappe.get_all(
 		"User Passkey",
 		filters={"user": frappe.session.user},
@@ -289,10 +323,14 @@ def list_passkeys():
 def revoke_passkey(name: str):
 	doc = frappe.get_doc("User Passkey", name)
 	if doc.user != frappe.session.user and "System Manager" not in frappe.get_roles():
-		frappe.throw(frappe.PermissionError)
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	user = doc.user
-	doc.delete()
+	# Ownership is checked above; the doctype grants no role to end users (C-1).
+	doc.delete(ignore_permissions=True)
 	log_event("passkey_revoked", user=user, method="passkey", success=True, detail=name)
+	notify.sign_in_methods_changed(
+		user, _('The passkey named "{0}" was removed from your account.').format(doc.friendly_name or name)
+	)
 	return {"ok": True}
 
 

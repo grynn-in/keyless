@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
+
+# Binding between a credential and its owner. Changing any of these after
+# insert would let a row be re-pointed at another account (audit C-1).
+LOCKED_FIELDS = ("user", "credential_id", "public_key", "user_handle")
 
 
 class UserPasskey(Document):
@@ -28,8 +33,21 @@ class UserPasskey(Document):
 		if not self.user:
 			self.user = frappe.session.user
 		if self.user != frappe.session.user and "System Manager" not in frappe.get_roles():
-			frappe.throw(frappe.PermissionError)
+			frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	def validate(self):
+		if self.is_new():
+			return
+		stored = frappe.db.get_value("User Passkey", self.name, LOCKED_FIELDS, as_dict=True)
+		if not stored:
+			return
+		changed = [f for f in LOCKED_FIELDS if (self.get(f) or None) != (stored.get(f) or None)]
+		if changed:
+			frappe.throw(
+				_("Cannot change {0} of a registered passkey").format(", ".join(changed)),
+				frappe.ValidationError,
+			)
 
 	def on_trash(self):
 		if self.user != frappe.session.user and "System Manager" not in frappe.get_roles():
-			frappe.throw(frappe.PermissionError)
+			frappe.throw(_("Not permitted"), frappe.PermissionError)

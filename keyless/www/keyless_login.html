@@ -19,23 +19,23 @@
 {% macro card_links(links) %}
 	{% for link in links %}
 	<div class="text-center sign-up-message">
-		<a href="{{ link.href }}">{{ link.label }}</a>
+		<a href="{{ link.href | e }}">{{ link.label | e }}</a>
 	</div>
 	{% endfor %}
 {% endmacro %}
 
 {% macro logo_section(title=null, subtitle=null) %}
 <div class="page-card-head">
-	<img class="app-logo" src="{{ logo }}" alt="{{ app_name }}">
+	<img class="app-logo" src="{{ logo | e }}" alt="{{ app_name | e }}">
 	{% if frappe_v16 %}
 	<div class="page-card-head-text">
-		<h4>{{ title or _("Sign In") }}</h4>
+		<h4>{{ (title or _("Sign In")) | e }}</h4>
 		{% if subtitle %}
-		<p class="page-card-subtitle">{{ subtitle }}</p>
+		<p class="page-card-subtitle">{{ subtitle | e }}</p>
 		{% endif %}
 	</div>
 	{% else %}
-	<h4>{{ title or _("Login to {0}").format(app_name or _("Frappe")) }}</h4>
+	<h4>{{ (title or _("Login to {0}").format(app_name or _("Frappe"))) | e }}</h4>
 	{% endif %}
 </div>
 {% endmacro %}
@@ -62,7 +62,7 @@
 	<label class="form-label{% if not frappe_v16 %} sr-only{% endif %}" for="{{ id }}">{{ _("Email") }}</label>
 	<div class="email-field">
 		<input type="email" id="{{ id }}" name="email" class="form-control"
-			placeholder="{{ _('jane@example.com') }}" required autocomplete="{{ autocomplete }}">
+			placeholder="{{ _('jane@example.com') | e }}" required autocomplete="{{ autocomplete }}">
 		<svg class="field-icon email-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"
 			xmlns="http://www.w3.org/2000/svg">
 			<use class="es-lock" href="#es-line-email"></use>
@@ -74,8 +74,8 @@
 
 {% macro code_field(id, label, autocomplete, inputmode, maxlength) %}
 <div class="form-group">
-	<label class="form-label{% if not frappe_v16 %} sr-only{% endif %}" for="{{ id }}">{{ label }}</label>
-	<input type="text" id="{{ id }}" name="{{ id }}" class="form-control" placeholder="{{ label }}"
+	<label class="form-label{% if not frappe_v16 %} sr-only{% endif %}" for="{{ id }}">{{ label | e }}</label>
+	<input type="text" id="{{ id }}" name="{{ id }}" class="form-control" placeholder="{{ label | e }}"
 		required autocomplete="{{ autocomplete }}" inputmode="{{ inputmode }}" maxlength="{{ maxlength }}"
 		autocapitalize="off" spellcheck="false">
 	{% if frappe_v16 %}<p class="field-error"></p>{% endif %}
@@ -97,7 +97,7 @@
 		data-keyless-action="link">{{ _("Login with Email Link") }}</button>
 	{% endcall %}{% endif %}
 	{% if not disable_password %}{% call option_wrap() %}
-	<a href="{{ password_login_url }}" class="btn btn-block btn-default btn-sm btn-login-option btn-keyless-password">
+	<a href="{{ password_login_url | e }}" class="btn btn-block btn-default btn-sm btn-login-option btn-keyless-password">
 		{{ _("Login with Password") }}</a>
 	{% endcall %}{% endif %}
 {% endmacro %}
@@ -117,7 +117,7 @@
 
 {% block page_content %}
 <div class="keyless-login" data-otp-length="{{ otp_length }}" data-frappe-major="{{ frappe_major }}"
-	{% if redirect_to %}data-redirect-to="{{ redirect_to }}"{% endif %}>
+	{% if redirect_to %}data-redirect-to="{{ redirect_to | e }}"{% endif %}>
 	<noscript>
 		<div class="text-center my-5">
 			<h4>{{ _("Javascript is disabled on your browser") }}</h4>
@@ -131,7 +131,7 @@
 			<p class="text-muted text-center">{{ _("Keyless is not enabled on this site.") }}</p>
 		</div>
 		<div class="page-card-actions">
-			<a href="{{ password_login_url }}" class="btn btn-sm {{ primary_btn }} btn-block btn-login">
+			<a href="{{ password_login_url | e }}" class="btn btn-sm {{ primary_btn }} btn-block btn-login">
 				{{ _("Login with Password") }}</a>
 		</div>
 	{% endcall %}

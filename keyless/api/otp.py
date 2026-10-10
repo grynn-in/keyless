@@ -5,19 +5,25 @@ from frappe import _
 from frappe.rate_limiter import rate_limit
 
 from keyless.api.common import (
-	constant_time_delay,
-	get_rate_limit,
+	HOUR,
+	after_response,
+	get_ip_rate_limit,
+	limit_mail_requests,
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
+	too_many,
 )
 from keyless.audit import log_event
 from keyless.auth import issue_session
-from keyless.tokens import random_otp, store_otp, verify_and_consume_otp
+from keyless.tokens import count_hit, hit_count, random_otp, store_otp, verify_and_consume_otp
+
+# An account may make this many times max_otp_attempts wrong guesses per hour.
+ACCOUNT_GUESS_FACTOR = 2
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_ip_rate_limit, seconds=HOUR)
 def request_otp(email: str):
 	"""Send a one-time email code. Always returns ok when enumeration is hidden."""
 	settings = require_enabled()
@@ -28,34 +34,33 @@ def request_otp(email: str):
 	if not email or "@" not in email:
 		frappe.throw(_("Enter a valid email address"))
 
-	user = pretend_success_if_unknown(email)
+	limit_mail_requests(email, settings, "otp")
+
 	expires = int(settings.otp_expiry_seconds or 300)
 	length = int(settings.otp_length or 6)
-
-	if user:
-		otp = random_otp(length)
-		store_otp(email, otp, expires)
-		_send_otp_mail(email, otp, expires)
-		log_event("otp_requested", user=user, method="email_otp", success=True)
-	else:
-		constant_time_delay()
-		if not settings.hide_user_enumeration:
-			frappe.throw(_("No active user found"), frappe.DoesNotExistError)
-		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
+	if not settings.hide_user_enumeration and not pretend_success_if_unknown(email):
+		frappe.throw(_("No active user found"), frappe.DoesNotExistError)
+	after_response(lambda: _deliver_otp(email, expires, length))
 
 	return {"ok": True, "expires_in": expires, "length": length}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@rate_limit(limit=get_rate_limit, seconds=60 * 60)
+@rate_limit(limit=get_ip_rate_limit, seconds=HOUR)
 def verify_otp(email: str, otp: str):
 	settings = require_enabled()
 	if not settings.enable_email_otp:
 		frappe.throw(_("Email OTP is disabled"))
 
 	email = normalize_email(email)
+	max_attempts = int(settings.max_otp_attempts or 5)
+	# Wrong guesses per account per hour, across every code issued in that hour,
+	# so requesting a new code does not buy more guesses (audit M-1).
+	if hit_count("otp-fail-hour", email) >= max_attempts * ACCOUNT_GUESS_FACTOR:
+		too_many()
 	user = pretend_success_if_unknown(email)
-	if not user or not verify_and_consume_otp(email, otp or "", int(settings.max_otp_attempts or 5)):
+	if not user or not verify_and_consume_otp(email, otp or "", max_attempts):
+		count_hit("otp-fail-hour", email, HOUR)
 		log_event("otp_failed", user=email, method="email_otp", success=False)
 		frappe.throw(_("Invalid or expired code"), frappe.AuthenticationError)
 
@@ -63,24 +68,43 @@ def verify_otp(email: str, otp: str):
 	return {"ok": True, "user": user, "home": _home_for(user)}
 
 
+def _deliver_otp(email: str, expires: int, length: int) -> None:
+	"""Create and mail a code if the address has an account; runs after the response."""
+	user = pretend_success_if_unknown(email)
+	if not user:
+		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
+		return
+	otp = random_otp(length)
+	store_otp(email, otp, expires)
+	_send_otp_mail(email, otp, expires)
+	log_event("otp_requested", user=user, method="email_otp", success=True)
+
+
 def _send_otp_mail(email: str, otp: str, expires: int):
 	app_name = frappe.get_website_settings("app_name") or frappe.get_system_settings("app_name") or _("Frappe")
 	minutes = max(1, int(expires / 60))
+	messages_before = len(frappe.local.message_log)
 	try:
 		frappe.sendmail(
 			recipients=email,
 			subject=_("Your {0} sign-in code").format(app_name),
 			template="keyless_otp",
 			args={"otp": otp, "minutes": minutes, "app_name": app_name},
-			now=True,
+			# Queued, so known and unknown addresses do the same work (audit M-2).
+			now=False,
 			with_container=True,
 		)
-	except frappe.OutgoingEmailError:
+	except Exception:
+		# Same response as for an unknown address; the failure is only logged.
+		# frappe.throw() queues its message before raising, so drop it too, or
+		# the error reaches the browser and shows the address exists (audit M-2).
+		del frappe.local.message_log[messages_before:]
 		frappe.log_error(title="Keyless OTP mail failed", message=frappe.get_traceback())
-		frappe.throw(_("Could not send email. Try a passkey or contact your administrator."))
 
 
 def _home_for(user: str) -> str:
 	if frappe.db.get_value("User", user, "user_type") == "System User":
 		return "/app"
-	return frappe.utils.get_url()
+	# A path, not get_url(): host_name may name another host or port than the
+	# one the person is on, and the browser would leave the site.
+	return "/"

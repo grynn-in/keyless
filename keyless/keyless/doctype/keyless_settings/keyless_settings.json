@@ -16,12 +16,12 @@
     "column_break_factors",
     "disable_password_login",
     "allow_administrator_password",
-    "allow_passwordless_signup",
     "hide_user_enumeration",
     "section_otp",
     "otp_length",
     "otp_expiry_seconds",
     "max_otp_attempts",
+    "otp_daily_limit",
     "column_break_otp",
     "magic_link_expiry_minutes",
     "rate_limit_per_hour",
@@ -29,13 +29,15 @@
     "section_webauthn",
     "rp_name",
     "rp_id",
+    "allowed_origins",
     "column_break_webauthn",
     "passkey_user_verification",
-    "require_passkey_for_system_users"
+    "require_passkey_for_system_users",
+    "step_up_window_minutes"
   ],
   "fields": [
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enabled",
       "fieldtype": "Check",
       "label": "Enable Keyless"
@@ -57,25 +59,25 @@
       "label": "Authenticators"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_passkeys",
       "fieldtype": "Check",
       "label": "Passkeys (WebAuthn)"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_magic_link",
       "fieldtype": "Check",
       "label": "Email Magic Link"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_email_otp",
       "fieldtype": "Check",
       "label": "Email OTP"
     },
     {
-      "default": "1",
+      "default": "0",
       "fieldname": "enable_backup_codes",
       "fieldtype": "Check",
       "label": "Backup Codes"
@@ -96,12 +98,6 @@
       "fieldname": "allow_administrator_password",
       "fieldtype": "Check",
       "label": "Allow Administrator Password (Break-glass)"
-    },
-    {
-      "default": "0",
-      "fieldname": "allow_passwordless_signup",
-      "fieldtype": "Check",
-      "label": "Allow Passwordless Signup"
     },
     {
       "default": "1",
@@ -131,7 +127,15 @@
       "default": "5",
       "fieldname": "max_otp_attempts",
       "fieldtype": "Int",
-      "label": "Max OTP Attempts"
+      "label": "Max OTP Attempts",
+      "description": "Wrong guesses allowed per code. Each account may also make at most twice this many wrong guesses per hour, across all codes."
+    },
+    {
+      "default": "10",
+      "description": "Sign-in codes an account can request per day.",
+      "fieldname": "otp_daily_limit",
+      "fieldtype": "Int",
+      "label": "Daily Code Limit per Account"
     },
     {
       "fieldname": "column_break_otp",
@@ -147,7 +151,8 @@
       "default": "5",
       "fieldname": "rate_limit_per_hour",
       "fieldtype": "Int",
-      "label": "Rate Limit per Hour"
+      "label": "Rate Limit per Hour",
+      "description": "Sign-in codes or links an account can request per hour, whatever the client IP. Limits per client IP are 20 times this for email and recovery-code requests and 200 times for passkeys, so an office behind one IP is not locked out."
     },
     {
       "default": "90",
@@ -167,10 +172,16 @@
       "label": "RP Name"
     },
     {
-      "description": "Must match the site hostname (no scheme, no port). Leave blank to use the current host.",
+      "description": "Must match the site hostname (no scheme, no port). Leave blank to use the configured site host (host_name in site_config, else the site name). Never taken from the request.",
       "fieldname": "rp_id",
       "fieldtype": "Data",
       "label": "RP ID"
+    },
+    {
+      "description": "Extra origins passkeys may be used from, one per line, e.g. https://erp.example.com:8001. The configured site URL is always allowed. Each origin's host must be the RP ID or a subdomain of it.",
+      "fieldname": "allowed_origins",
+      "fieldtype": "Small Text",
+      "label": "Allowed Origins"
     },
     {
       "fieldname": "column_break_webauthn",
@@ -187,12 +198,20 @@
       "default": "0",
       "fieldname": "require_passkey_for_system_users",
       "fieldtype": "Check",
-      "label": "Require a Passkey for System Users"
+      "label": "Require a Passkey for System Users",
+      "description": "System Users cannot sign in with an email code or magic link, or with a password unless Frappe two-factor authentication applies to them. Passkeys and backup codes still work. Administrator break-glass is unaffected."
+    },
+    {
+      "default": "5",
+      "description": "How recently a user must have signed in, or confirmed with a passkey or email code, before adding a passkey or generating new backup codes.",
+      "fieldname": "step_up_window_minutes",
+      "fieldtype": "Int",
+      "label": "Step-up Window (minutes)"
     }
   ],
   "issingle": 1,
   "links": [],
-  "modified": "2026-09-18 12:00:00.000000",
+  "modified": "2026-10-07 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Keyless",
   "name": "Keyless Settings",

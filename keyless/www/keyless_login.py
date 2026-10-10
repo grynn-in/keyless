@@ -12,8 +12,8 @@ from frappe.apps import get_default_path
 from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 from frappe.utils import cint
 from frappe.website.utils import get_home_page
-from frappe.www.login import sanitize_redirect
 
+from keyless.redirects import safe_redirect
 from keyless.settings import get_settings, is_enabled
 
 no_cache = 1
@@ -25,9 +25,8 @@ def frappe_major_version() -> int:
 
 def get_context(context):
 	frappe_major = frappe_major_version()
-	redirect_to = sanitize_redirect(
-		frappe.form_dict.get("redirect-to") or frappe.form_dict.get("redirect_to")
-	)
+	# Same-site relative paths only; anything else falls back to the default (audit H-1).
+	redirect_to = safe_redirect(frappe.form_dict.get("redirect-to") or frappe.form_dict.get("redirect_to"))
 
 	# Same as Frappe's login page: a signed-in user is sent on, not shown the form.
 	if frappe.session.user != "Guest":
@@ -86,7 +85,7 @@ def get_context(context):
 	if context.enable_backup_codes:
 		context.footer_links.append({"href": "#recovery", "label": _("Use a recovery code")})
 	if context.disable_password and context.allow_administrator_password:
-		# Break-glass: the `login` override still accepts Administrator's password.
+		# Break-glass: the password policy still accepts Administrator's password.
 		context.footer_links.append(
 			{"href": context.password_login_url, "label": _("Administrator? Login with password")}
 		)

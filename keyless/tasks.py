@@ -1,14 +1,9 @@
-"""Scheduler jobs — Redis TTLs already expire challenges; this is belt-and-braces."""
+"""Scheduler jobs. Challenges, codes and magic links live in Redis and expire there."""
 
 from __future__ import annotations
 
 import frappe
 from frappe.utils import add_days, now_datetime
-
-
-def purge_expired_challenges():
-	# Challenges live in Redis and expire on their own. Nothing to do.
-	return
 
 
 def purge_old_audit_logs():
