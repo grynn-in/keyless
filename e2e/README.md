@@ -36,7 +36,8 @@ node run.js
 
 A `*.localhost` site name resolves to your machine in Chromium, so no hosts-file entry is
 needed. Mail is not sent: the suite sets `mute_emails` and reads codes and links from the
-Email Queue.
+Email Queue. It also sets `host_name` and Keyless's Allowed Origins to the URL it tests, so
+emailed links and passkeys use the right host and port.
 
 Settings, all optional:
 

@@ -103,6 +103,8 @@ jobs:
           bench new-site --db-root-password root --admin-password admin --mariadb-user-host-login-scope='%' e2e.localhost
           bench --site e2e.localhost install-app keyless
           bench --site e2e.localhost set-config allow_tests true
+          # Emailed links and the passkey origin come from configuration; include the port.
+          bench --site e2e.localhost set-config host_name http://e2e.localhost:8000
           (bench serve --port 8000 > /tmp/bench-serve.log 2>&1 &)
           cd apps/keyless/e2e
           npm ci

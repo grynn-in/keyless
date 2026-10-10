@@ -31,13 +31,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let SYS, SYS2;
 
 async function waitForMail(to, pattern, since) {
-	for (let i = 0; i < 20; i++) {
+	// Each poll is a `bench execute`, which takes a second or two on a CI runner.
+	const deadline = Date.now() + 45000;
+	while (Date.now() < deadline) {
 		const text = mail(to);
 		const m = text.match(pattern);
 		if (m && m[0] !== since) return m;
 		await sleep(500);
 	}
-	throw new Error(`no mail matching ${pattern} for ${to}`);
+	const errors = server("recent_errors") || [];
+	throw new Error(`no mail matching ${pattern} for ${to}; recent Error Log: ${errors.join(" | ") || "none"}`);
 }
 
 async function step(name, page, fn) {
@@ -106,7 +109,7 @@ async function openKeylessMenu(page, user, item) {
 
 (async () => {
 	fs.mkdirSync(SHOTS, { recursive: true });
-	[SYS, SYS2] = server("setup");
+	[SYS, SYS2] = server("setup", { url: BASE });
 	console.log(`Keyless browser suite against ${BASE} (site ${SITE})\n`);
 	const browser = await chromium.launch();
 

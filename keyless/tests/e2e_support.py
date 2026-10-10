@@ -7,6 +7,7 @@ Only for throwaway test sites: every helper refuses to run unless the site has
 from __future__ import annotations
 
 import email
+from urllib.parse import urlsplit
 from email import policy
 
 import frappe
@@ -15,18 +16,32 @@ from frappe.installer import update_site_config
 USERS = ("e2e-passkey@example.com", "e2e-nopasskey@example.com")
 
 
+def _origin(url: str | None) -> str:
+	if not url:
+		return ""
+	parts = urlsplit(url)
+	return f"{parts.scheme}://{parts.netloc}"
+
+
 def _require_test_site():
 	if not frappe.conf.get("allow_tests"):
 		frappe.throw("The Keyless browser suite only runs on sites with allow_tests set.")
 
 
-def setup() -> list[str]:
-	"""Reset the site to a known state for one run of the suite. Returns the test users."""
+def setup(url: str | None = None) -> list[str]:
+	"""Reset the site to a known state for one run of the suite. Returns the test users.
+
+	`url` is where the suite reaches the site. It becomes host_name, so emailed links
+	and the passkey origin (which come from configuration, never request headers)
+	match it, port included.
+	"""
 	_require_test_site()
 	frappe.set_user("Administrator")
 
 	# Mail is queued but never sent; the suite reads codes and links from the queue.
 	update_site_config("mute_emails", 1)
+	if url:
+		update_site_config("host_name", url.rstrip("/"))
 
 	settings = frappe.get_single("Keyless Settings")
 	settings.update(
@@ -42,7 +57,9 @@ def setup() -> list[str]:
 			rate_limit_per_hour=50,
 			otp_daily_limit=50,
 			rp_id="",
-			allowed_origins="",
+			# Also accept the suite's origin for passkeys: a running server may not have
+			# reread site_config yet, and settings take effect at once.
+			allowed_origins=_origin(url),
 			step_up_window_minutes=5,
 		)
 	)
@@ -100,6 +117,12 @@ def last_mail(recipient: str) -> dict:
 			if part.get_content_type() in ("text/plain", "text/html")
 		)
 	}
+
+
+def recent_errors(limit: int = 5) -> list[str]:
+	"""Titles of the newest Error Log entries, to explain a step that failed."""
+	_require_test_site()
+	return frappe.get_all("Error Log", fields=["method"], order_by="creation desc", limit=limit, pluck="method")
 
 
 def clear_step_up() -> bool:
