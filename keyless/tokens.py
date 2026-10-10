@@ -112,20 +112,41 @@ def _delete_otp(email: str) -> bool:
 	return bool(deleted)
 
 
+def _rate_key(bucket: str, identity: str) -> bytes:
+	return _raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")
+
+
+# Count and set the expiry in one atomic step. A counter found without an expiry
+# (left by an older version that set it separately) gets one too.
+_COUNT = (
+	"local n = redis.call('incr', KEYS[1]) "
+	"if redis.call('ttl', KEYS[1]) < 0 then redis.call('expire', KEYS[1], ARGV[1]) end "
+	"return n"
+)
+
+
 def count_hit(bucket: str, identity: str, window_sec: int) -> int:
 	"""Atomically count one event for `identity` in a fixed window; return the count.
 
+	The expiry is set in the same step as the count, so a counter can never be left
+	without one (which would lock the identity out for good).
 	Identities (e.g. email addresses) are stored as digests, never in clear.
 	"""
-	key = _raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")
-	count = frappe.cache.incrby(key, 1)
-	if count == 1:
-		frappe.cache.expire(key, window_sec)
-	return count
+	return cint(frappe.cache.eval(_COUNT, 1, _rate_key(bucket, identity), int(window_sec)))
+
+
+# Decrement only while the counter exists, so a give-back after the window ended
+# cannot create a negative counter with no expiry.
+_UNCOUNT = "if redis.call('exists', KEYS[1]) == 1 then return redis.call('decr', KEYS[1]) end return 0"
+
+
+def uncount_hit(bucket: str, identity: str) -> None:
+	"""Give back one event counted by count_hit (for an attempt that succeeded)."""
+	frappe.cache.eval(_UNCOUNT, 1, _rate_key(bucket, identity))
 
 
 def hit_count(bucket: str, identity: str) -> int:
-	return cint(frappe.cache.get(_raw_key(f"{RATE_CACHE_PREFIX}{bucket}:{digest(identity)}")))
+	return cint(frappe.cache.get(_rate_key(bucket, identity)))
 
 
 def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str | None = None) -> None:

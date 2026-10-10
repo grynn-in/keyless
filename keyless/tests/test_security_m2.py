@@ -137,7 +137,10 @@ class TestEmailFactors(EnumerationCase):
 				self.assertEqual(seen[0], seen[1])
 				self.assertEqual(seen[0][1], [])
 
-	def test_mail_is_queued_not_sent_inline(self):
+	def test_mail_is_sent_when_the_transaction_commits(self):
+		# Not left in the email queue for the scheduler: a code could arrive near its
+		# expiry, or never. Creating and mailing it happens after the response, so
+		# known and unknown addresses still answer in the same time.
 		for fn, cmd in (
 			(otp.request_otp, "keyless.api.otp.request_otp"),
 			(magic_link.send_link, "keyless.api.magic_link.send_link"),
@@ -145,7 +148,7 @@ class TestEmailFactors(EnumerationCase):
 			with self.subTest(cmd=cmd), keyless_settings(**ALL_ON), patch("frappe.sendmail") as sendmail:
 				self.call(fn, cmd, email=NO_PASSKEY)
 				sendmail.assert_called_once()
-				self.assertFalse(sendmail.call_args.kwargs.get("now"))
+				self.assertTrue(sendmail.call_args.kwargs.get("now"))
 
 
 class TestBackupRedeem(EnumerationCase):

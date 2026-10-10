@@ -12,11 +12,11 @@ from keyless.api.common import (
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
-	too_many,
+	take_attempt,
 )
 from keyless.audit import log_event
 from keyless.auth import issue_session
-from keyless.tokens import count_hit, hit_count, random_otp, store_otp, verify_and_consume_otp
+from keyless.tokens import random_otp, store_otp, verify_and_consume_otp
 
 # An account may make this many times max_otp_attempts wrong guesses per hour.
 ACCOUNT_GUESS_FACTOR = 2
@@ -54,16 +54,17 @@ def verify_otp(email: str, otp: str):
 
 	email = normalize_email(email)
 	max_attempts = int(settings.max_otp_attempts or 5)
-	# Wrong guesses per account per hour, across every code issued in that hour,
-	# so requesting a new code does not buy more guesses (audit M-1).
-	if hit_count("otp-fail-hour", email) >= max_attempts * ACCOUNT_GUESS_FACTOR:
-		too_many()
+	# Guesses per account per hour, across every code issued in that hour, so
+	# requesting a new code does not buy more guesses (audit M-1). Account-wide, not
+	# per IP: this is what bounds guessing a 6-digit code, so it must not grow with
+	# the attacker's IPs. A person locked out here can still use a magic link or a passkey.
+	give_back = take_attempt("otp-guess-hour", email, max_attempts * ACCOUNT_GUESS_FACTOR, HOUR, per_ip=False)
 	user = pretend_success_if_unknown(email)
 	if not user or not verify_and_consume_otp(email, otp or "", max_attempts):
-		count_hit("otp-fail-hour", email, HOUR)
 		log_event("otp_failed", user=email, method="email_otp", success=False)
 		frappe.throw(_("Invalid or expired code"), frappe.AuthenticationError)
 
+	give_back()
 	issue_session(user, method="email_otp")
 	return {"ok": True, "user": user, "home": _home_for(user)}
 
@@ -90,8 +91,10 @@ def _send_otp_mail(email: str, otp: str, expires: int):
 			subject=_("Your {0} sign-in code").format(app_name),
 			template="keyless_otp",
 			args={"otp": otp, "minutes": minutes, "app_name": app_name},
-			# Queued, so known and unknown addresses do the same work (audit M-2).
-			now=False,
+			# Sent as soon as the transaction commits, not left for the next run of the
+			# email queue (up to minutes later, or never with the scheduler off). Sign-in
+			# codes are created after the response, so this adds no timing difference.
+			now=True,
 			with_container=True,
 		)
 	except Exception:

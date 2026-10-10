@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ from frappe.utils import set_request
 from webauthn.helpers import bytes_to_base64url
 
 from keyless.api import otp, passkey
+from keyless.api.common import ACCOUNT_BACKSTOP_FACTOR
 from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
 
 USERS = [f"kl-l2-{i}@example.com" for i in range(4)]
@@ -109,42 +111,87 @@ class TestSharedIP(FrappeTestCase):
 
 
 class TestAccountLimitsAcrossIPs(FrappeTestCase):
-	"""Per-account limits that replace the old low per-IP limits (L-2)."""
+	"""Per-account limits that replace the old low per-IP limits (L-2). Each holds per
+	address and client IP, with an account-wide backstop of ACCOUNT_BACKSTOP_FACTOR
+	times the limit, so a stranger cannot lock the owner out (code review of #7)."""
 
 	def setUp(self):
 		reset_rate_limits()
 		self.addCleanup(reset_rate_limits)
 		self.ip = 0
 
-	def _new_ip(self, cmd, **form):
+	def _new_ip(self, cmd, ip=None, **form):
 		self.ip += 1
 		set_request(method="POST", path=f"/api/method/{cmd}")
-		frappe.local.request_ip = f"203.0.113.{self.ip}"
+		frappe.local.request_ip = ip or f"203.0.{self.ip // 250}.{self.ip % 250 + 1}"
 		frappe.local.form_dict = frappe._dict(cmd=cmd, **form)
 
-	def test_magic_links_per_account(self):
+	def _send(self, ip=None):
 		from keyless.api import magic_link
 
-		with (
-			keyless_settings(enabled=1, enable_magic_link=1, rate_limit_per_hour=3, otp_daily_limit=10),
-			patch.object(magic_link, "_send_link_mail"),
-			patch.object(magic_link, "log_event"),
-		):
-			for _ in range(3):
-				self._new_ip("keyless.api.magic_link.send_link", email=USERS[0])
-				magic_link.send_link(USERS[0])
-			self._new_ip("keyless.api.magic_link.send_link", email=USERS[0])
-			with self.assertRaises(frappe.RateLimitExceededError):
-				magic_link.send_link(USERS[0])
+		self._new_ip("keyless.api.magic_link.send_link", ip=ip, email=USERS[0])
+		return magic_link.send_link(USERS[0])
 
-	def test_wrong_backup_codes_per_account(self):
+	def _redeem(self, ip=None):
 		from keyless.api import backup
 
-		with keyless_settings(enabled=1, enable_backup_codes=1), patch.object(backup, "log_event"):
-			for _ in range(backup.BACKUP_FAILURES_PER_HOUR):
-				self._new_ip("keyless.api.backup.redeem", email=USERS[0])
-				with self.assertRaises(frappe.AuthenticationError):
-					backup.redeem(USERS[0], "WRONGCODE1")
-			self._new_ip("keyless.api.backup.redeem", email=USERS[0])
+		self._new_ip("keyless.api.backup.redeem", ip=ip, email=USERS[0])
+		return backup.redeem(USERS[0], "WRONGCODE1")
+
+	def _magic_link_settings(self):
+		from keyless.api import magic_link
+
+		stack = ExitStack()
+		stack.enter_context(
+			keyless_settings(enabled=1, enable_magic_link=1, rate_limit_per_hour=3, otp_daily_limit=1000)
+		)
+		stack.enter_context(patch.object(magic_link, "_send_link_mail"))
+		stack.enter_context(patch.object(magic_link, "log_event"))
+		return stack
+
+	def _backup_settings(self):
+		from keyless.api import backup
+
+		stack = ExitStack()
+		stack.enter_context(keyless_settings(enabled=1, enable_backup_codes=1))
+		stack.enter_context(patch.object(backup, "log_event"))
+		return stack
+
+	def test_magic_links_per_account_and_ip(self):
+		with self._magic_link_settings():
+			for _ in range(3):
+				self._send(ip="198.51.100.66")
 			with self.assertRaises(frappe.RateLimitExceededError):
-				backup.redeem(USERS[0], "WRONGCODE1")
+				self._send(ip="198.51.100.66")
+			# The owner, elsewhere, still gets a link.
+			self.assertTrue(self._send(ip="192.0.2.10")["ok"])
+
+	def test_magic_links_account_backstop(self):
+		with self._magic_link_settings():
+			for _ in range(3 * ACCOUNT_BACKSTOP_FACTOR):
+				self._send()
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self._send()
+
+	def test_wrong_backup_codes_per_account_and_ip(self):
+		from keyless.api import backup
+
+		with self._backup_settings():
+			for _ in range(backup.BACKUP_FAILURES_PER_HOUR):
+				with self.assertRaises(frappe.AuthenticationError):
+					self._redeem(ip="198.51.100.66")
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self._redeem(ip="198.51.100.66")
+			# The owner, elsewhere, can still try a code.
+			with self.assertRaises(frappe.AuthenticationError):
+				self._redeem(ip="192.0.2.10")
+
+	def test_wrong_backup_codes_account_backstop(self):
+		from keyless.api import backup
+
+		with self._backup_settings():
+			for _ in range(backup.BACKUP_FAILURES_PER_HOUR * ACCOUNT_BACKSTOP_FACTOR):
+				with self.assertRaises(frappe.AuthenticationError):
+					self._redeem()
+			with self.assertRaises(frappe.RateLimitExceededError):
+				self._redeem()

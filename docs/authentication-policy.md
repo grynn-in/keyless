@@ -138,20 +138,34 @@ Notes:
 
 ### Email sign-in codes: limits
 
-Limits count per account (the email address, ignoring case and spaces), whatever IP the
-requests come from. Addresses with no account are counted the same way, so the limits
-reveal nothing. Hitting a limit gives HTTP 429, *"Too many attempts. Try again later."*
+Limits count per account (the email address, ignoring case and spaces). Addresses with no
+account are counted the same way, so the limits reveal nothing. Hitting a limit gives
+HTTP 429, *"Too many attempts. Try again later."*
+
+Anyone who knows an address could use up a limit on it, so limits on requests and on
+recovery codes count per address **and client IP**: a stranger hitting the limit from their
+machine does not stop the owner signing in from theirs. The same address may make **10
+times** the limit in total, from all IPs together, before it is refused everywhere; that
+backstop is what bounds an attacker who has many IPs. Wrong guesses at a sign-in code are
+the exception: they count per address only, because that limit is what keeps a 6-digit code
+from being guessed, and it must not grow with the number of IPs an attacker has. Someone
+refused there can still sign in with a magic link or a passkey.
+
+Every attempt is counted before it is checked, so parallel requests cannot together get
+past a limit. Correct codes are given back, so signing in does not use up the budget for
+wrong guesses.
 
 | If… | Then… |
 |---|---|
-| An address has asked for more than **Rate Limit per Hour** codes in the last hour | Refused until the hour is up. |
-| An address has asked for more than **Daily Code Limit per Account** codes (default 10) in a day | Refused until the day is up. |
+| An address has asked for more than **Rate Limit per Hour** codes in the last hour from one IP | Refused from that IP until the hour is up. Other IPs can still ask, up to 10 times the limit in total. |
+| An address has asked for more than **Daily Code Limit per Account** codes (default 10) in a day from one IP | Refused from that IP until the day is up. Other IPs can still ask, up to 10 times the limit in total. |
 | A code gets more than **Max OTP Attempts** wrong guesses | That code is deleted; request a new one. |
-| An account makes twice **Max OTP Attempts** wrong guesses in an hour, across all its codes | Every code for it is refused until the hour is up. Requesting a new code does not reset this. |
+| An account makes twice **Max OTP Attempts** wrong guesses in an hour, across all its codes and from any IP | Every code for it is refused until the hour is up. Requesting a new code does not reset this. Magic links and passkeys still work. |
 | Someone guesses wrong | The code keeps its original expiry (**OTP Expiry**); guessing never extends it. |
 | Two requests send the right code at the same moment | Only one gets a session. |
 | An address has asked for too many **magic links** | The same hourly and daily limits apply to links as to codes, counted separately. |
-| An address gets 10 wrong **recovery codes** in an hour | Recovery codes for it are refused until the hour is up. |
+| An address gets 10 wrong **recovery codes** in an hour from one IP | Recovery codes for it are refused from that IP until the hour is up; other IPs can still try, up to 100 in total. Recovery codes are 10 characters from 32 (50 bits), so 100 guesses an hour do not make them guessable. |
+| A counter is found without an expiry (left by an earlier version) | It gets one on its next use, so no limit can last for ever. |
 | Two requests use the same recovery code at the same moment | Only one gets a session; the code is then used. |
 
 Limits per client IP only stop floods from one address, so that a whole office behind one
@@ -162,7 +176,7 @@ requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 
 | If… | Then… |
 |---|---|
-| The address has an account, has none, or the mail server fails | The same response: *"ok"*. Mail goes into Frappe's Email Queue instead of being sent during the request; a sending failure is only written to the Error Log. Check the Email Queue if people report missing codes. |
+| The address has an account, has none, or the mail server fails | The same response: *"ok"*, in the same time. The code or link is created and mailed after the response has gone, and sent at once rather than left for the next run of the email queue, so it does not depend on the scheduler. A sending failure is only written to the Error Log; check it, and the Email Queue, if people report missing codes. |
 | **Hide User Enumeration** is off | Unknown addresses get *"No active user found"*, as before. |
 
 ### Magic links: confirm before signing in
@@ -216,7 +230,7 @@ minutes).
 |---|---|
 | The person signed in within the window (any method) | Allowed. |
 | They confirmed with one of **their own** passkeys within the window | Allowed. |
-| They confirmed with a code emailed to them within the window | Allowed. Offered only when **Email OTP** is on and email factors are allowed for them (section 3). |
+| They confirmed with a code emailed to them within the window | Allowed. Offered only when **Email OTP** is on and email factors are allowed for them (section 3). The code is sent at once. The same hourly and daily limits apply as to sign-in codes, and twice **Max OTP Attempts** wrong guesses an hour. |
 | None of these | Refused (*"Confirm it's you before changing how you sign in."*). In Desk, Keyless asks them to confirm with a passkey, or else an emailed code, and then continues. With neither available, they must sign out and in again. |
 | They try to confirm with someone else's passkey | Refused. |
 
@@ -340,13 +354,13 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |
 | Login-page and magic-link targets must be same-site paths | Nothing for normal use. Links or integrations that pass full URLs as `redirect-to` now land on the default page. |
 | Magic links need one extra click | Tell users the link opens a "Sign in" page with a button. |
-| Codes and links are queued in the Email Queue | Make sure Frappe's email queue is running (scheduler enabled); otherwise codes arrive late or not at all. Mail failures are no longer shown to users. |
+| Codes and links are mailed after the response, and sent at once | Nothing; they no longer wait for the email queue. Notifications about sign-in method changes are still queued, so keep the scheduler running. Mail failures are no longer shown to users. |
 | New limits on sign-in codes per account (hourly, daily, wrong guesses) | Review **Rate Limit per Hour**, **Daily Code Limit per Account** and **Max OTP Attempts**. |
 | Adding a passkey or generating backup codes asks people to confirm it's them | Nothing; set **Step-up Window** if 5 minutes does not suit. |
 | Passkey sign-in no longer uses the email field | Nothing for passkeys registered by Keyless. |
 | The reverse proxy must overwrite `X-Forwarded-For` | See the README's "Reverse proxy" section. |
 | Codes are peppered with `encryption_key` from site_config | A new site may not have one yet; Keyless then creates and saves it, as Frappe does for encrypted passwords. It never falls back to `secret_key` or an empty value. **Rotating `encryption_key` invalidates every stored backup code**, so ask users to generate new codes afterwards. |
-| Per-IP limits are much higher; per-account limits now also cover magic links and recovery codes | Review **Rate Limit per Hour** and **Daily Code Limit per Account**. |
+| Per-IP limits are much higher; per-account limits now also cover magic links and recovery codes, and count per address and IP with an account-wide backstop of 10 times the limit | Review **Rate Limit per Hour** and **Daily Code Limit per Account**. |
 | The hourly `purge_expired_challenges` job is removed | Nothing; it never did anything. |
 
 ---

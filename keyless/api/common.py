@@ -45,15 +45,48 @@ def too_many():
 	frappe.throw(_("Too many attempts. Try again later."), frappe.RateLimitExceededError)
 
 
-def limit_mail_requests(email: str, settings, kind: str) -> None:
-	"""Per-account limits on codes or links mailed to `email`, whatever the client IP.
-	Unknown addresses are counted the same way, so the limits reveal nothing (M-1)."""
-	from keyless.tokens import count_hit
+# Limits that anyone who knows an address could use up are kept per address and
+# client IP, so a stranger cannot lock the owner out from one machine. The same
+# address may make this many times the limit in total, from all IPs, before it is
+# refused everywhere; that backstop is what bounds an attacker with many IPs.
+ACCOUNT_BACKSTOP_FACTOR = 10
 
-	if count_hit(f"{kind}-request-hour", email, HOUR) > int(settings.rate_limit_per_hour or 5):
+
+def take_attempt(bucket: str, identity: str, limit: int, window: int, *, per_ip: bool = True):
+	"""Count one attempt for `identity` and refuse it once over the limit.
+
+	The count happens before the attempt is checked, so parallel requests cannot all
+	pass a limit they would only exceed together. Returns a function that gives the
+	attempt back, for attempts that turn out not to count (a correct code).
+	per_ip=False counts per identity only, for limits that must not grow with the
+	number of IPs an attacker has (guesses at a short code).
+	"""
+	from keyless.tokens import count_hit, uncount_hit
+
+	counted = []
+	if per_ip:
+		scoped = f"{identity}\n{getattr(frappe.local, 'request_ip', None) or ''}"
+		counted.append((f"{bucket}-ip", scoped))
+		if count_hit(f"{bucket}-ip", scoped, window) > limit:
+			too_many()
+		limit *= ACCOUNT_BACKSTOP_FACTOR
+	counted.append((bucket, identity))
+	if count_hit(bucket, identity, window) > limit:
 		too_many()
-	if count_hit(f"{kind}-request-day", email, DAY) > int(settings.otp_daily_limit or 10):
-		too_many()
+
+	def give_back():
+		for counted_bucket, counted_identity in counted:
+			uncount_hit(counted_bucket, counted_identity)
+
+	return give_back
+
+
+def limit_mail_requests(email: str, settings, kind: str) -> None:
+	"""Hourly and daily limits on codes or links mailed to `email`, per address and
+	client IP, with an account-wide backstop (see take_attempt). Unknown addresses
+	are counted the same way, so the limits reveal nothing (M-1)."""
+	take_attempt(f"{kind}-request-hour", email, int(settings.rate_limit_per_hour or 5), HOUR)
+	take_attempt(f"{kind}-request-day", email, int(settings.otp_daily_limit or 10), DAY)
 
 
 def normalize_email(email: str) -> str:

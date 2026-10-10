@@ -124,8 +124,9 @@ def _send_link_mail(email: str, link: str, minutes: int):
 			subject=_("Sign in to {0}").format(app_name),
 			template="keyless_magic_link",
 			args={"link": link, "minutes": minutes, "app_name": app_name},
-			# Queued, so known and unknown addresses do the same work (audit M-2).
-			now=False,
+			# Sent as soon as the transaction commits; the link is created after the
+			# response, so this adds no timing difference (see _send_otp_mail).
+			now=True,
 			with_container=True,
 		)
 	except Exception:
