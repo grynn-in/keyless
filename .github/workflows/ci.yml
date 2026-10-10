@@ -14,9 +14,23 @@ permissions:
 
 jobs:
   tests:
-    name: Server tests (Frappe v16)
+    name: Tests (Frappe v${{ matrix.frappe }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Keyless supports Frappe 15 and 16 (pyproject.toml). The browser suite runs
+          # once, on 16; it exercises the front end, which is the same on both.
+          - frappe: "16"
+            python: "3.14"
+            node: 24
+            browser: true
+          - frappe: "15"
+            python: "3.11"
+            node: 20
+            browser: false
 
     services:
       mariadb:
@@ -42,12 +56,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
 
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
 
       - name: Install bench
         run: |
@@ -61,7 +75,7 @@ jobs:
       - name: Set up bench and site
         working-directory: /home/runner
         run: |
-          bench init --skip-redis-config-generation --skip-assets --frappe-branch version-16 --python "$(which python)" frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --frappe-branch version-${{ matrix.frappe }} --python "$(which python)" frappe-bench
           cd frappe-bench
           bench get-app keyless "$GITHUB_WORKSPACE"
           bench setup requirements --dev
@@ -79,3 +93,38 @@ jobs:
         run: bench --site test_site run-tests --app keyless
         env:
           CI: "Yes"
+
+      # Real Chromium with a virtual WebAuthn authenticator against a running site; see
+      # e2e/README.md. A *.localhost site name resolves to this machine in Chromium.
+      - name: Set up browser test site
+        if: matrix.browser
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench new-site --db-root-password root --admin-password admin --mariadb-user-host-login-scope='%' e2e.localhost
+          bench --site e2e.localhost install-app keyless
+          bench --site e2e.localhost set-config allow_tests true
+          (bench serve --port 8000 > /tmp/bench-serve.log 2>&1 &)
+          cd apps/keyless/e2e
+          npm ci
+          npx playwright install --with-deps chromium
+          for i in $(seq 60); do curl -sf -o /dev/null http://e2e.localhost:8000/keyless/login && exit 0; sleep 2; done
+          cat /tmp/bench-serve.log
+          exit 1
+        env:
+          CI: "Yes"
+
+      - name: Run browser tests
+        if: matrix.browser
+        working-directory: /home/runner/frappe-bench/apps/keyless/e2e
+        run: node run.js
+        env:
+          KEYLESS_E2E_BENCH: /home/runner/frappe-bench
+
+      - name: Upload browser screenshots
+        if: matrix.browser && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-screenshots
+          path: |
+            /home/runner/frappe-bench/apps/keyless/e2e/screenshots
+            /tmp/bench-serve.log
