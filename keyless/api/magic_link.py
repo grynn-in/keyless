@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import escape_html, get_url
+from frappe.utils import add_to_date, escape_html, get_url, now_datetime
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
@@ -17,7 +17,45 @@ from keyless.api.common import (
 from keyless.audit import log_event
 from keyless.auth import issue_session
 from keyless.redirects import safe_redirect
-from keyless.tokens import consume_magic_link, peek_magic_link, random_token, store_magic_key
+from keyless.tokens import compare, consume_magic_link, digest, peek_magic_link, random_token, store_magic_key
+
+
+# A link only works in the browser that asked for it. send_link gives that browser a
+# random ID in this cookie and stores a digest of it with the link; opening and
+# confirming the link need the same ID. A page on another site can make a visitor's
+# browser submit the confirmation form with a link the attacker asked for (signing
+# the visitor into the attacker's account), but that browser has no matching ID, and
+# SameSite=Lax keeps the cookie off cross-site form posts anyway (D8 follow-up).
+BROWSER_COOKIE = "keyless_link_browser"
+
+
+def _browser_id() -> str | None:
+	request = getattr(frappe.local, "request", None)
+	value = request.cookies.get(BROWSER_COOKIE) if request else None
+	# Only IDs Keyless could have issued (random_token(32) is 43 URL-safe characters).
+	if value and len(value) == 43 and value.replace("-", "").replace("_", "").isalnum():
+		return value
+	return None
+
+
+def _bind_to_browser(expiry_min: int) -> str:
+	"""This browser's ID (new if it has none), with the cookie kept for the link's life.
+	One ID per browser, so every link it asked for keeps working."""
+	browser = _browser_id() or random_token(32)
+	cookie_manager = getattr(frappe.local, "cookie_manager", None)
+	if cookie_manager:
+		cookie_manager.set_cookie(
+			BROWSER_COOKIE, browser, expires=add_to_date(now_datetime(), minutes=expiry_min), httponly=True
+		)
+	return browser
+
+
+def _same_browser(payload: dict) -> bool:
+	expected = payload.get("browser")
+	if not expected:  # sent before links were bound to a browser
+		return True
+	browser = _browser_id()
+	return bool(browser) and compare(browser, expected)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -37,7 +75,9 @@ def send_link(email: str, redirect_to: str | None = None):
 	if not settings.hide_user_enumeration and not pretend_success_if_unknown(email):
 		frappe.throw(_("No active user found"), frappe.DoesNotExistError)
 	target = safe_redirect(redirect_to)
-	after_response(lambda: _deliver_link(email, expiry_min, target))
+	# Every request gets the cookie, whether or not the address has an account (M-2).
+	browser = digest(_bind_to_browser(expiry_min))
+	after_response(lambda: _deliver_link(email, expiry_min, target, browser))
 
 	return {"ok": True, "expires_in": expiry_min * 60}
 
@@ -52,9 +92,19 @@ def login_via_link(key: str, redirect_to: str | None = None):
 	if not settings.enable_magic_link:
 		frappe.throw(_("Magic link login is disabled"))
 
+	link = peek_magic_link(key or "")
+	if not link:
+		if frappe.request.method == "POST":
+			log_event("magic_link_failed", method="magic_link", success=False)
+		return _invalid_link_page()
+	if not _same_browser(link):
+		# The link stays valid, so its owner can still open it in the right browser.
+		if frappe.request.method == "POST":
+			log_event(
+				"magic_link_failed", user=link.get("email"), method="magic_link", success=False, detail="other_browser"
+			)
+		return _other_browser_page()
 	if frappe.request.method != "POST":
-		if not peek_magic_link(key or ""):
-			return _invalid_link_page()
 		return _confirmation_page(key, safe_redirect(redirect_to))
 
 	payload = consume_magic_link(key or "") or {}
@@ -80,6 +130,18 @@ def _invalid_link_page():
 	)
 
 
+def _other_browser_page():
+	frappe.respond_as_web_page(
+		_("Open this link where you asked for it"),
+		_(
+			"For your security, a sign-in link only works in the browser it was requested from. "
+			"Open it there, or request a new link or an email code in this browser."
+		),
+		http_status_code=403,
+		indicator_color="orange",
+	)
+
+
 def _confirmation_page(key: str, redirect_to: str | None):
 	app_name = frappe.get_website_settings("app_name") or frappe.get_system_settings("app_name") or _("Frappe")
 	fields = {"key": key}
@@ -101,7 +163,7 @@ def _confirmation_page(key: str, redirect_to: str | None):
 	frappe.respond_as_web_page(_("Sign in"), html, indicator_color="blue", primary_action=None)
 
 
-def _deliver_link(email: str, expiry_min: int, redirect_to: str | None) -> None:
+def _deliver_link(email: str, expiry_min: int, redirect_to: str | None, browser: str | None = None) -> None:
 	"""Create and mail a link if the address has an account; runs after the response."""
 	user = pretend_success_if_unknown(email)
 	if not user:
@@ -109,7 +171,7 @@ def _deliver_link(email: str, expiry_min: int, redirect_to: str | None) -> None:
 		return
 	key = random_token(32)
 	# The target stays in Redis with the key, never in the emailed URL (audit H-2).
-	store_magic_key(key, email, expiry_min * 60, redirect_to=redirect_to)
+	store_magic_key(key, email, expiry_min * 60, redirect_to=redirect_to, browser=browser)
 	link = get_url(f"/api/method/keyless.api.magic_link.login_via_link?key={key}", allow_header_override=False)
 	_send_link_mail(email, link, expiry_min)
 	log_event("magic_link_sent", user=user, method="magic_link", success=True)
