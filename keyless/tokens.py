@@ -149,20 +149,23 @@ def hit_count(bucket: str, identity: str) -> int:
 	return cint(frappe.cache.get(_rate_key(bucket, identity)))
 
 
-def store_magic_key(key: str, email: str, expires_in_sec: int, redirect_to: str | None = None) -> None:
+def store_magic_key(
+	key: str, email: str, expires_in_sec: int, redirect_to: str | None = None, browser: str | None = None
+) -> None:
 	# Key is unguessable; value is the bound email and post-login target, kept
-	# server-side so the emailed URL cannot be edited to point elsewhere.
+	# server-side so the emailed URL cannot be edited to point elsewhere, and the
+	# digest of the requesting browser's ID (see keyless.api.magic_link).
 	cache_set(
 		MAGIC_CACHE_PREFIX,
 		key,
-		{"email": email, "redirect_to": redirect_to, "created": str(now_datetime())},
+		{"email": email, "redirect_to": redirect_to, "browser": browser, "created": str(now_datetime())},
 		expires_in_sec,
 	)
 
 
-def peek_magic_link(key: str) -> bool:
-	"""Whether a magic-link key is still valid, without using it up."""
-	return bool(key) and cache_get(MAGIC_CACHE_PREFIX, key) is not None
+def peek_magic_link(key: str) -> dict[str, Any] | None:
+	"""The stored payload of a still-valid magic-link key, without using it up."""
+	return cache_get(MAGIC_CACHE_PREFIX, key) if key else None
 
 
 def consume_magic_link(key: str) -> dict[str, Any] | None:

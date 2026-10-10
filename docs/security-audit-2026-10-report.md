@@ -60,6 +60,5 @@ It found two bugs in the M-3 step-up dialog, fixed in `8a3bece`: the code field 
 
 ## Open items
 
-- **D8 follow-up:** bind magic links to the requesting browser. Until then a page on another
-  site can submit the confirmation form with an attacker's own link, and a leaked link works
-  from any device until it expires.
+- ~~**D8 follow-up:** bind magic links to the requesting browser.~~ Done after the audit: a
+  link only works in the browser that asked for it (`keyless_link_browser` cookie).

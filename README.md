@@ -12,7 +12,7 @@ A standard Frappe app (`hooks.py`, DocTypes, whitelisted methods, website page, 
 | --- | --- | --- |
 | Passkey | AAL2 when user verification is `required` | Public key + credential id on **User Passkey** |
 | Email OTP | AAL1 | HMAC digest in Redis, 5 min TTL |
-| Magic link | AAL1 | Unguessable key in Redis, 10 min TTL, one-shot |
+| Magic link | AAL1 | Unguessable key in Redis, 10 min TTL, one-shot, works only in the requesting browser |
 | Backup codes | Recovery | HMAC digest on **Keyless Backup Code** |
 | Password | Optional / break-glass | Unchanged Frappe `User.password` |
 

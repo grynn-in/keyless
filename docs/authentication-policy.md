@@ -179,7 +179,7 @@ requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 | The address has an account, has none, or the mail server fails | The same response: *"ok"*, in the same time. The code or link is created and mailed after the response has gone, and sent at once rather than left for the next run of the email queue, so it does not depend on the scheduler. A sending failure is only written to the Error Log; check it, and the Email Queue, if people report missing codes. |
 | **Hide User Enumeration** is off | Unknown addresses get *"No active user found"*, as before. |
 
-### Magic links: confirm before signing in
+### Magic links: confirm before signing in, in the same browser
 
 | If… | Then… |
 |---|---|
@@ -187,10 +187,16 @@ requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 | They press **Sign in** | The link is used up and they are signed in. |
 | The link is used again, has expired, or is not real | *"This sign-in link is invalid or has expired."* (HTTP 403). |
 | Two requests confirm the same link at the same moment | Only one gets a session. |
+| The link is opened or confirmed in a different browser from the one that asked for it (another device, another browser or profile, or a private window) | *"Open this link where you asked for it"* (HTTP 403), with no button. The link is **not** used up, so it still works in the right browser. A confirmation is logged as `magic_link_failed` / `other_browser`. |
+| A page on another site submits the confirmation form, for example with a link the attacker asked for, to sign the visitor into the attacker's account | Refused the same way: the visitor's browser has no matching ID, and the cookie is not sent on cross-site form posts anyway. |
+| Someone else gets hold of the link (a forwarded email, a mailbox they can read) | Useless outside the browser that asked for it. |
+| A link was sent before this change | It works from any browser until it expires (at most **Magic Link Expiry**). |
 
-Not covered yet (D8 follow-up): a page on another site could still submit the confirmation
-form with an attacker's own link, signing the victim into the attacker's account, and a
-leaked link still works from any device until it expires.
+How it works: asking for a link gives the browser a random ID in the `keyless_link_browser`
+cookie (HttpOnly, SameSite=Lax, kept for the link's lifetime; reused for later links, so every
+link a browser asked for keeps working). A digest of the ID is stored with the link. Every
+request gets the cookie, whether or not the address has an account. People who read mail
+on another device should use an email code, which works anywhere.
 
 ---
 
@@ -354,6 +360,7 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |
 | Login-page and magic-link targets must be same-site paths | Nothing for normal use. Links or integrations that pass full URLs as `redirect-to` now land on the default page. |
 | Magic links need one extra click | Tell users the link opens a "Sign in" page with a button. |
+| Magic links only work in the browser they were requested from | Tell users to open the link on the same device and browser, or use an email code. If the mail app opens links in another browser, the link is refused there. |
 | Codes and links are mailed after the response, and sent at once | Nothing; they no longer wait for the email queue. Notifications about sign-in method changes are still queued, so keep the scheduler running. Mail failures are no longer shown to users. |
 | New limits on sign-in codes per account (hourly, daily, wrong guesses) | Review **Rate Limit per Hour**, **Daily Code Limit per Account** and **Max OTP Attempts**. |
 | Adding a passkey or generating backup codes asks people to confirm it's them | Nothing; set **Step-up Window** if 5 minutes does not suit. |
@@ -378,6 +385,6 @@ Maintainer decisions taken during the 2026-10 security remediation.
 | D5 | Factors refused for System Users when passkeys are required | Email OTP and magic link. Backup codes stay as recovery. |
 | D6 | Passkey sign-in options for an email address | Discoverable credentials only; the `email` parameter is dropped. |
 | D7 | Recent re-authentication before adding a passkey or rotating backup codes | Required, within a Step-up Window setting (default 5 minutes). |
-| D8 | Magic-link hardening | Opening the link shows a confirmation page; only its POST signs in. Binding the link to the requesting browser is a later follow-up. |
+| D8 | Magic-link hardening | Opening the link shows a confirmation page; only its POST signs in. The link only works in the browser that asked for it (follow-up, done). |
 | D9 | Passwords for System Users when passkeys are required | Allowed only when Frappe 2FA applies to the user. Never through the OAuth2 password grant, which skips 2FA. |
 | D10 | Backup codes for users with Frappe 2FA | Allowed, as the recovery path. |
