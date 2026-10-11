@@ -2,6 +2,7 @@
 
 Run on demand with:
 	bench --site <site> execute keyless.security.report_repointed_passkeys
+	bench --site <site> execute keyless.security.report_self_cleared_passwordless_only
 """
 
 from __future__ import annotations
@@ -50,4 +51,53 @@ def report_repointed_passkeys() -> list[dict]:
 	message = "Review these User Passkey rows (audit C-1, F-2):\n" + "\n".join(lines)
 	print(f"Keyless: {len(rows)} suspicious User Passkey row(s).\n{message}")
 	frappe.log_error(title="Keyless: review User Passkey ownership", message=message)
+	return rows
+
+
+def find_self_cleared_passwordless_only() -> list[dict]:
+	"""Users who turned off their own Passwordless Only (audit 2026-10-10, F-3).
+
+	Read from the User record's Version history: changes of
+	keyless_passwordless_only from on to off saved by the user themselves.
+	Changes made with frappe.db.set_value leave no Version and are not found.
+	"""
+	rows = frappe.get_all(
+		"Version",
+		filters={"ref_doctype": "User", "data": ("like", "%keyless_passwordless_only%")},
+		fields=["name", "docname", "owner", "creation", "data"],
+		order_by="creation",
+	)
+	found = []
+	for row in rows:
+		if row.owner != row.docname:
+			continue
+		try:
+			changed = frappe.parse_json(row.data).get("changed") or []
+		except Exception:
+			continue
+		for change in changed:
+			if len(change) == 3 and change[0] == "keyless_passwordless_only" and change[1] and not change[2]:
+				found.append(
+					frappe._dict(
+						version=row.name,
+						user=row.docname,
+						changed_on=row.creation,
+						still_off=not frappe.db.get_value("User", row.docname, "keyless_passwordless_only"),
+					)
+				)
+	return found
+
+
+def report_self_cleared_passwordless_only() -> list[dict]:
+	"""Print and log users who cleared their own Passwordless Only. Reports only."""
+	rows = find_self_cleared_passwordless_only()
+	if not rows:
+		print("Keyless: no user turned off their own Passwordless Only.")
+		return rows
+	lines = [
+		f"{r.user} on {r.changed_on} (Version {r.version}){'; still off' if r.still_off else ''}" for r in rows
+	]
+	message = "These users turned off their own Passwordless Only (audit 2026-10-10, F-3):\n" + "\n".join(lines)
+	print(f"Keyless: {len(rows)} self-made Passwordless Only change(s).\n{message}")
+	frappe.log_error(title="Keyless: review Passwordless Only changes", message=message)
 	return rows

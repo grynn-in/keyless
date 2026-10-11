@@ -2,6 +2,12 @@
 
 Keyless Settings defaults come from keyless_settings.json. A fresh install
 leaves Keyless and every factor off until an administrator opts in (audit H-3).
+
+The Keyless fields on User are permlevel 1, which Frappe grants only to System
+Manager: Frappe shares each User record with its owner for writing, so at
+permlevel 0 a user, or anyone holding their session, could clear Passwordless
+Only and sign in with a password again (audit 2026-10-10, F-3). after_migrate
+applies these definitions to existing sites too.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ CUSTOM_FIELDS = {
 			"fieldtype": "Section Break",
 			"insert_after": "new_password",
 			"collapsible": 1,
+			"permlevel": 1,
 		},
 		{
 			"fieldname": "keyless_user_handle",
@@ -26,6 +33,7 @@ CUSTOM_FIELDS = {
 			"read_only": 1,
 			"unique": 1,
 			"no_copy": 1,
+			"permlevel": 1,
 			"insert_after": "keyless_section",
 			"description": "Stable WebAuthn user.id. Generated on first passkey registration.",
 		},
@@ -33,8 +41,9 @@ CUSTOM_FIELDS = {
 			"fieldname": "keyless_passwordless_only",
 			"label": "Passwordless Only",
 			"fieldtype": "Check",
+			"permlevel": 1,
 			"insert_after": "keyless_user_handle",
-			"description": "Block password login for this user even if site-wide passwords remain enabled.",
+			"description": "Block password login for this user even if site-wide passwords remain enabled. Only a System Manager can change it.",
 		},
 	]
 }
