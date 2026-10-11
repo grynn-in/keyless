@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Fixes F-1 to F-3 of the follow-up security audit of 10 October 2026. See
+[Upgrading](docs/authentication-policy.md#8-upgrading-from-earlier-versions).
+
+- A 2FA `tmp_id` with nothing cached let a password login skip the policy check, so on a
+  blocked account a correct password was answered differently from a wrong one (F-1).
+- System Managers could add a passkey to any account, Administrator included, and sign in as
+  its owner. Passkeys now only come from the user's own registration, and every add or
+  removal, from any path, is logged and emailed to the owner (F-2).
+- Users could turn off their own Passwordless Only. The Keyless fields on User are now
+  System Manager only; changes are logged and emailed. A migrate patch reports anyone who
+  cleared it themselves before (F-3).
+
 ## 2.0.0 (unreleased)
 
 Security release. It fixes every finding of the Keyless security audit of 7 October 2026

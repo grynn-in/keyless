@@ -11,7 +11,13 @@ from frappe.utils import set_request
 from webauthn.helpers import bytes_to_base64url
 
 from keyless.api import backup, magic_link, otp, passkey
-from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
+from keyless.tests.security_utils import (
+	delete_user,
+	insert_passkey,
+	keyless_settings,
+	make_user,
+	reset_rate_limits,
+)
 
 WITH_PASSKEY = "kl-m2-pk@example.com"
 NO_PASSKEY = "kl-m2-nopk@example.com"
@@ -43,15 +49,14 @@ class EnumerationCase(FrappeTestCase):
 		frappe.set_user("Administrator")
 		make_user(WITH_PASSKEY)
 		make_user(NO_PASSKEY)
-		frappe.get_doc(
+		insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": WITH_PASSKEY,
 				"credential_id": bytes_to_base64url(secrets.token_bytes(16)),
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 				"user_handle": frappe.db.get_value("User", WITH_PASSKEY, "keyless_user_handle"),
 			}
-		).insert(ignore_permissions=True)
+		)
 		frappe.db.commit()
 
 	@classmethod

@@ -2,6 +2,7 @@
 
 Run on demand with:
 	bench --site <site> execute keyless.security.report_repointed_passkeys
+	bench --site <site> execute keyless.security.report_self_cleared_passwordless_only
 """
 
 from __future__ import annotations
@@ -10,11 +11,14 @@ import frappe
 
 
 def find_repointed_passkeys() -> list[dict]:
-	"""User Passkey rows that may have been re-pointed at another account (audit C-1).
+	"""User Passkey rows that may have been re-pointed at another account (audit C-1),
+	or added to it by someone else (audit 2026-10-10, F-2).
 
 	Flags rows whose creator is not the bound user, or whose stored user handle
-	is not the bound user's WebAuthn handle. A System Manager creating a row on
-	someone's behalf also matches the first check, so review rather than delete.
+	is not the bound user's WebAuthn handle. Before F-2 a System Manager could
+	create a row for any user from Desk or REST; such rows match the first
+	check. Since F-2 only the user's own registration can create a row, so a
+	new match needs looking into. Review rather than delete.
 	"""
 	rows = frappe.db.sql(
 		"""
@@ -44,7 +48,56 @@ def report_repointed_passkeys() -> list[dict]:
 		print("Keyless: no suspicious User Passkey rows found.")
 		return rows
 	lines = [f"{r.name}: user={r.user} owner={r.owner} ({'; '.join(r.reasons)})" for r in rows]
-	message = "Review these User Passkey rows (audit C-1):\n" + "\n".join(lines)
+	message = "Review these User Passkey rows (audit C-1, F-2):\n" + "\n".join(lines)
 	print(f"Keyless: {len(rows)} suspicious User Passkey row(s).\n{message}")
 	frappe.log_error(title="Keyless: review User Passkey ownership", message=message)
+	return rows
+
+
+def find_self_cleared_passwordless_only() -> list[dict]:
+	"""Users who turned off their own Passwordless Only (audit 2026-10-10, F-3).
+
+	Read from the User record's Version history: changes of
+	keyless_passwordless_only from on to off saved by the user themselves.
+	Changes made with frappe.db.set_value leave no Version and are not found.
+	"""
+	rows = frappe.get_all(
+		"Version",
+		filters={"ref_doctype": "User", "data": ("like", "%keyless_passwordless_only%")},
+		fields=["name", "docname", "owner", "creation", "data"],
+		order_by="creation",
+	)
+	found = []
+	for row in rows:
+		if row.owner != row.docname:
+			continue
+		try:
+			changed = frappe.parse_json(row.data).get("changed") or []
+		except Exception:
+			continue
+		for change in changed:
+			if len(change) == 3 and change[0] == "keyless_passwordless_only" and change[1] and not change[2]:
+				found.append(
+					frappe._dict(
+						version=row.name,
+						user=row.docname,
+						changed_on=row.creation,
+						still_off=not frappe.db.get_value("User", row.docname, "keyless_passwordless_only"),
+					)
+				)
+	return found
+
+
+def report_self_cleared_passwordless_only() -> list[dict]:
+	"""Print and log users who cleared their own Passwordless Only. Reports only."""
+	rows = find_self_cleared_passwordless_only()
+	if not rows:
+		print("Keyless: no user turned off their own Passwordless Only.")
+		return rows
+	lines = [
+		f"{r.user} on {r.changed_on} (Version {r.version}){'; still off' if r.still_off else ''}" for r in rows
+	]
+	message = "These users turned off their own Passwordless Only (audit 2026-10-10, F-3):\n" + "\n".join(lines)
+	print(f"Keyless: {len(rows)} self-made Passwordless Only change(s).\n{message}")
+	frappe.log_error(title="Keyless: review Passwordless Only changes", message=message)
 	return rows

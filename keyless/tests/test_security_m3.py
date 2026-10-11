@@ -15,7 +15,13 @@ from frappe.utils import set_request
 from webauthn.helpers import bytes_to_base64url
 
 from keyless.api import backup, passkey
-from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
+from keyless.tests.security_utils import (
+	delete_user,
+	insert_passkey,
+	keyless_settings,
+	make_user,
+	reset_rate_limits,
+)
 
 USER = "kl-m3-user@example.com"
 OTHER = "kl-m3-other@example.com"
@@ -181,15 +187,14 @@ class TestStepUpByPasskey(StepUpCase):
 	def _passkey_for(self, user):
 		credential_id = bytes_to_base64url(secrets.token_bytes(16))
 		handle = frappe.db.get_value("User", user, "keyless_user_handle")
-		frappe.get_doc(
+		insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": user,
 				"credential_id": credential_id,
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 				"user_handle": handle,
 			}
-		).insert(ignore_permissions=True)
+		)
 		return credential_id, handle
 
 	def _assert_with(self, credential_id, handle):

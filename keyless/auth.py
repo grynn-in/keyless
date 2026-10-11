@@ -30,24 +30,35 @@ def before_login(login_manager):
 	before the password is checked, so a blocked login looks the same whether
 	or not the password was right (audit C-2)."""
 	frappe.flags.keyless_password_login = True
-	login_name = frappe.form_dict.get("usr")
-	if frappe.form_dict.get("tmp_id"):
-		# Second leg of Frappe's 2FA flow: credentials come from the cache.
-		from frappe.twofactor import get_cached_user_pass
+	password_policy.enforce(login_name=password_login_name())
 
-		login_name = get_cached_user_pass()[0]
-	password_policy.enforce(login_name=login_name)
+
+def password_login_name() -> str | None:
+	"""The login name LoginManager.login() is about to check, chosen as Frappe chooses it.
+
+	The second leg of Frappe's 2FA flow (`tmp_id`) takes the name and password
+	from the cache, but only when both are there; otherwise Frappe falls back to
+	the form's `usr` and `pwd` (LoginManager.authenticate, v15 and v16). A
+	`tmp_id` with nothing cached used to make this check nobody while Frappe
+	still checked the form's password (audit 2026-10-10, F-1).
+	"""
+	from frappe.twofactor import get_cached_user_pass
+
+	user, pwd = get_cached_user_pass()
+	if user and pwd:
+		return user
+	return frappe.form_dict.get("usr")
 
 
 def on_login(login_manager):
 	if not is_enabled():
 		return
 	if not frappe.flags.get("keyless_login"):
-		if frappe.flags.get("keyless_password_login"):
-			# Authoritative check on the user Frappe actually authenticated.
-			password_policy.enforce(user=login_manager.user)
-		elif password_policy.is_password_login_request():
-			# Frappe 15 before keyless.compat patched login() in this process.
+		if frappe.flags.get("keyless_password_login") or password_policy.is_password_login_request():
+			# Authoritative check on the user Frappe actually authenticated. The
+			# password is already verified here, so a refusal must look like a
+			# wrong password, never like BLOCKED_MESSAGE (F-1). The second case
+			# is Frappe 15 before keyless.compat patched login() in this process.
 			password_policy.enforce_after_password_check(login_manager)
 		else:
 			password_policy.enforce_mailed_login(login_manager.user)

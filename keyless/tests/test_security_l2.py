@@ -16,7 +16,13 @@ from webauthn.helpers import bytes_to_base64url
 
 from keyless.api import otp, passkey
 from keyless.api.common import ACCOUNT_BACKSTOP_FACTOR
-from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
+from keyless.tests.security_utils import (
+	delete_user,
+	insert_passkey,
+	keyless_settings,
+	make_user,
+	reset_rate_limits,
+)
 
 USERS = [f"kl-l2-{i}@example.com" for i in range(4)]
 OFFICE_IP = "198.51.100.7"
@@ -46,15 +52,14 @@ class TestSharedIP(FrappeTestCase):
 		for user in USERS:
 			make_user(user)
 			credential_id = bytes_to_base64url(secrets.token_bytes(16))
-			frappe.get_doc(
+			insert_passkey(
 				{
-					"doctype": "User Passkey",
 					"user": user,
 					"credential_id": credential_id,
 					"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 					"user_handle": frappe.db.get_value("User", user, "keyless_user_handle"),
 				}
-			).insert(ignore_permissions=True)
+			)
 			cls.passkeys[user] = credential_id
 		frappe.db.commit()
 

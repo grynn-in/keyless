@@ -47,6 +47,7 @@ extend_bootinfo = "keyless.boot.extend_bootinfo"
 
 doc_events = {
 	"User": {
+		"validate": "keyless.user.validate_user",
 		"after_insert": "keyless.user.after_user_insert",
 		"on_trash": "keyless.user.on_user_trash",
 		"on_update": "keyless.user.on_user_update",

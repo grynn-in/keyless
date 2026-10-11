@@ -17,7 +17,13 @@ from webauthn.helpers import bytes_to_base64url
 
 from keyless import tokens
 from keyless.api import passkey
-from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
+from keyless.tests.security_utils import (
+	delete_user,
+	insert_passkey,
+	keyless_settings,
+	make_user,
+	reset_rate_limits,
+)
 
 USER = "kl-i1-user@example.com"
 ON = {"enabled": 1, "enable_passkeys": 1, "rp_id": "", "allowed_origins": ""}
@@ -72,15 +78,14 @@ class PasskeySignIn(FrappeTestCase):
 		self.addCleanup(frappe.db.rollback)
 		self.credential_id = bytes_to_base64url(secrets.token_bytes(16))
 		self.handle = frappe.db.get_value("User", USER, "keyless_user_handle")
-		self.passkey = frappe.get_doc(
+		self.passkey = insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": USER,
 				"credential_id": self.credential_id,
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 				"user_handle": self.handle,
 			}
-		).insert(ignore_permissions=True)
+		)
 
 	def _request(self, cmd):
 		set_request(method="POST", path=f"/api/method/{cmd}")

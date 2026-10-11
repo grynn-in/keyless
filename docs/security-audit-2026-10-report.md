@@ -62,3 +62,18 @@ It found two bugs in the M-3 step-up dialog, fixed in `8a3bece`: the code field 
 
 - ~~**D8 follow-up:** bind magic links to the requesting browser.~~ Done after the audit: a
   link only works in the browser that asked for it (`keyless_link_browser` cookie).
+
+## Follow-up audit of 10 October 2026: F-1 to F-3
+
+A second review of `main` after this remediation found three medium findings, fixed on
+branch `fix/audit-2026-10-10`. Each was checked against the code first; all three held, on
+Frappe 15 and 16 (Frappe 16's `LoginManager.login` and `authenticate` read the same way). The
+other findings of that review (F-4 to F-14) are not addressed here.
+
+| ID | Finding | Fix commit | Test file | Deviation from the suggested fix, and why |
+|---|---|---|---|---|
+| F-1 | A 2FA `tmp_id` with nothing cached made `before_login` check nobody, while Frappe checked the form's `usr`/`pwd`; on a blocked account a correct password got the Keyless message from `on_login` and a wrong one "Invalid login credentials" | `70e97c5` | `test_security_f1.py` | Also changed `on_login`: once the password has been checked it refuses with "Invalid login credentials" on every version, not only on Frappe 15's fallback path, so a gap in `before_login` cannot become an oracle again. |
+| F-2 | A System Manager could create a User Passkey for any user, Administrator included, and sign in as them, with no notice or audit entry | `8203e9c` | `test_security_f2.py` | Inserts are refused unless `verify_registration` marked the row for its own user (document flag, which request bodies cannot set). System Manager also lost create permission. Logging and notification moved into the controller, so deletes from Desk or REST are now notified too. The ownership report runs once more on migrate; nothing is deleted automatically, because a report cannot tell a malicious row from a helpful one. |
+| F-3 | Users could untick Passwordless Only (and change their WebAuthn handle) on their own User record | `b46582f` | `test_security_f3.py` | Permission level 1 plus a validate hook refusing "off" unless a System Manager is signed in. Turning it on is not refused server-side but, through Desk and REST, only System Managers can change it either way. No user step-up path: the flag exists so that the user's session cannot undo it. A patch also reports users who cleared it themselves before the fix, from the User version history. |
+
+Tests: Frappe 15.121 (isms.local) and CI on Frappe 15 and 16.
