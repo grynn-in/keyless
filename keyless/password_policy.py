@@ -213,11 +213,13 @@ def enforce(*, login_name: str | None = None, user: str | None = None, method: s
 
 
 def enforce_after_password_check(login_manager) -> None:
-	"""Frappe 15 path: the password is already verified when this runs.
+	"""on_login check for password logins: the password is already verified
+	when this runs.
 
-	Answering with BLOCKED_MESSAGE here would tell a caller the password was
-	right, so fail the login the way Frappe fails a wrong password. The audit
-	log keeps the real reason.
+	It catches anything `before_login` missed (on Frappe 15, a worker's first
+	request before keyless.compat is in place). Answering with BLOCKED_MESSAGE
+	here would tell a caller the password was right, so fail the login the way
+	Frappe fails a wrong password. The audit log keeps the real reason.
 	"""
 	if _blocked(user=login_manager.user):
 		login_manager.fail("Invalid login credentials", user=login_manager.user)
