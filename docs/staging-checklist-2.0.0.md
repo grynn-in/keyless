@@ -34,19 +34,26 @@ Record these on the copy. They predict what happens to production.
       System Users, Rate Limit per Hour, Daily Code Limit per Account, Max OTP Attempts.
 - [ ] List users who will lose password login. These settings are enforced for the first
       time in 2.0.0:
-  - [ ] everyone, if **Disable Password Login** is on;
+  - [ ] everyone, if **Disable Password Login** is on (Administrator keeps the break-glass
+        password if **Allow Administrator Password** is on);
   - [ ] users with **Passwordless Only** set;
-  - [ ] System Users **without Frappe 2FA** and without a passkey, if **Require a Passkey for
-        System Users** is on.
-- [ ] List Frappe 2FA users without a passkey or backup codes. They lose email codes and
-      magic links.
+  - [ ] if **Require a Passkey for System Users** is on: every System User **without
+        Frappe 2FA** loses password login (having a passkey does not change this), and
+        **every** System User loses email codes and magic links.
+- [ ] List Frappe 2FA users: they lose email codes and magic links.
+- [ ] From the lists above, pick out the users left with **no factor they can use**: no
+      passkey, no backup codes, and email codes and magic links either switched off or
+      refused for them (every System User under Require a Passkey, every Frappe 2FA user).
+      They cannot sign in at all after the upgrade; give them a passkey or backup codes
+      first.
 - [ ] List OAuth clients that use the password grant for users who will lose password login.
 - [ ] Check custom code and integrations for `/api/resource/User Passkey` writes,
       imports of `keyless.overrides.login`, and full URLs passed as `redirect-to`.
 
 ## 2. Upgrade
 
-- [ ] `bench get-app` / checkout at `main` (2.0.0), then `bench --site <site> migrate`.
+- [ ] Check out the commit being staged (`main` at `fc3b8c0` or later; write the hash
+      down, it is the commit to tag), then `bench --site <site> migrate`.
 - [ ] `bench build --app keyless`, then restart gunicorn and workers.
 - [ ] Migrate finished without errors.
 - [ ] Error Log has no **"Keyless: check passkey origins"** entry, or it was fixed by setting
@@ -58,15 +65,26 @@ Record these on the copy. They predict what happens to production.
 
 ## 3. Automated browser suite
 
-The suite resets Keyless settings and creates test users. Run it on the **copy only**,
-then put the settings noted in step 1 back.
+The suite resets Keyless settings, changes site_config and creates two **System Manager**
+test users. Run it on the **copy only**, and undo all of that afterwards.
 
+It calls `bench execute`, so run it **on the staging server**, which needs Node and
+Playwright's Chromium (`cd apps/keyless/e2e && npm ci && npx playwright install --with-deps chromium`).
+
+- [ ] Prepare: `bench --site <site> set-config allow_tests 1` and
+      `bench --site <site> set-config mute_emails 1` (the suite reads codes from the Email
+      Queue), then restart gunicorn so it rereads site_config.
 - [ ] `KEYLESS_E2E_SITE=<site> KEYLESS_E2E_URL=https://<staging host> node run.js` from
-      `apps/keyless/e2e` (see [e2e/README.md](../e2e/README.md)). The suite reads codes from
-      the Email Queue, so it needs `mute_emails` for the run; set it, restart, run, then
-      unset it and restart again.
+      `apps/keyless/e2e` (see [e2e/README.md](../e2e/README.md)).
 - [ ] All 9 flows pass.
-- [ ] Keyless Settings restored to the values from step 1.
+- [ ] Clean up:
+  - [ ] delete the users `e2e-passkey@example.com` and `e2e-nopasskey@example.com`, with
+        their User Passkey and Keyless Backup Code rows;
+  - [ ] `bench --site <site> set-config allow_tests 0` and
+        `bench --site <site> set-config mute_emails 0`;
+  - [ ] `host_name` back to the staging https URL if it changed, and Keyless Settings
+        (including **Allowed Origins**) back to the values from step 1;
+  - [ ] restart gunicorn.
 
 ## 4. Manual sign-in on real devices
 
@@ -79,6 +97,10 @@ signed in), sign out, sign in with the passkey, then sign in with an email code.
 | Android Chrome | [ ] | [ ] | [ ] | [ ] |
 | Windows Hello (Edge or Chrome) | [ ] | [ ] | [ ] | [ ] |
 | Physical security key (e.g. YubiKey) | [ ] | [ ] | n/a | n/a |
+
+- [ ] With the **security key as the user's only passkey**, generating backup codes asks to
+      confirm, and the key confirms it. (Security keys may omit the user handle; step-up
+      must still accept them. The browser suite cannot cover this.)
 
 Also check:
 
@@ -109,4 +131,5 @@ Also check:
 - [ ] Results posted on the release issue.
 
 Then release: in `CHANGELOG.md` change `## 2.0.0 (unreleased)` to `## 2.0.0 (<date>)`,
-commit, and tag `v2.0.0` on that commit.
+commit, and tag `v2.0.0` on that commit. If `main` has moved past the staged commit with
+code changes, stage again first.
