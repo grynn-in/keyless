@@ -3,6 +3,7 @@
 This page describes what Keyless does in each situation. It covers the
 security fixes on branch `fix/security-audit-2026-10` (audit of 7 October 2026):
 Phase 1 (C-1, C-2, H-4), Phase 2 (H-1, H-2, H-3, H-5), Phase 3 (M-1 to M-4) and Phase 4 (L-1 to L-4, I-1).
+It also covers F-1 to F-3 of the follow-up audit of 10 October 2026.
 
 Settings named here live in **Keyless Settings** unless stated otherwise.
 "Blocked" means the request gets **HTTP 401** with the message
@@ -20,7 +21,7 @@ Frappe signs a user in with a password on these paths, and Keyless enforces the 
 |---|---|
 | `POST /api/method/login` (the standard `/login` page uses this) | yes |
 | `cmd=login` sent to **any** URL, for example `POST /api/method/ping` | yes |
-| Second step of Frappe's two-factor login (`tmp_id` + `otp`) | yes |
+| Second step of Frappe's two-factor login (`tmp_id` + `otp`) | yes, for the user Frappe actually checks: the cached one when the `tmp_id` is live, otherwise the form's `usr` (F-1) |
 | OAuth2 token endpoint with `grant_type=password` (see section 2) | yes |
 
 Frappe's **password reset link** (from "Forgot password", or from an expired password) signs the
@@ -55,7 +56,7 @@ Rules are checked in this order; the first that matches wins.
 | 2 | The user is **Administrator** and **Allow Administrator Password (Break-glass)** is on | Allowed, even when every other rule below would block. |
 | 3 | **Disable Password Login** is on | Blocked, for every login name, including unknown names and Administrator without break-glass. |
 | 4 | The login name matches no user | Not handled by Keyless. Frappe answers *"Invalid login credentials"*. |
-| 5 | The user has **Passwordless Only** ticked (User form, Keyless section) | Blocked. |
+| 5 | The user has **Passwordless Only** ticked (User form, Keyless section; only System Managers can see or change it, see below) | Blocked. |
 | 6 | **Require a Passkey for System Users** is on, the user is a System User, and Frappe 2FA does **not** apply to them | Blocked. |
 | 6a | Same, but Frappe 2FA **does** apply to them | Allowed. Frappe then asks for the second factor (authenticator code, SMS or email) before creating the session. |
 | 7 | None of the above | Allowed. Frappe checks the password, 2FA, IP and login-hour restrictions as usual. |
@@ -70,6 +71,14 @@ Rules are checked in this order; the first that matches wins.
   This tells an outsider that the account exists and cannot use a password. It does not reveal
   the password. If that matters, turn on **Disable Password Login** site-wide.
 - Blocked attempts do not count towards Frappe's failed-login lockout, because no password is checked.
+- **If a request carries a 2FA `tmp_id` that has nothing cached** (expired, used or made up),
+  Frappe checks the form's `usr` and `pwd` instead, and so does Keyless. Before F-1, Keyless
+  checked nobody in that case, and a correct password on a blocked account got a different
+  answer from a wrong one.
+- **If a blocked login ever gets past that first check** (on Frappe 15, a worker's first
+  request, see below), `on_login` refuses it after the password check with Frappe's
+  *"Invalid login credentials"*, exactly as a wrong password is refused, on every Frappe
+  version. It never answers with the Keyless message once a password has been checked.
 
 **On Frappe 15**, which has no `before_login` trigger, Keyless adds the one call Frappe 16 makes
 at the start of `LoginManager.login()` (`keyless/compat.py`), so the rules above hold there too:
@@ -79,6 +88,23 @@ Until then, `on_login` checks the password login instead, after the password che
 then gets Frappe's *"Invalid login credentials"*, the same response as a wrong password. One gap
 remains for that first request only: a correct but **expired** password gets Frappe's "Password
 Reset" answer, which shows the password was right. The reset link it carries is still refused.
+
+### Who can change Passwordless Only
+
+The Keyless section of the User form (**WebAuthn User Handle** and **Passwordless Only**) is
+at permission level 1. On User, Frappe 15 and 16 give level 1 only to **System Manager**.
+
+| If… | Then… |
+|---|---|
+| A user opens their own User record | The Keyless section is not shown. |
+| A user, or anyone with their session, tries to change either field through the form, `/api/resource/User` or `frappe.client.set_value` | The stored value is kept; Frappe silently ignores fields above the caller's level. |
+| Server code saves a User with `ignore_permissions` and turns Passwordless Only **off**, while the signed-in user is not a System Manager | Refused (*"Only a System Manager can turn off Passwordless Only."*), logged as `passwordless_only_changed` with `success` off. |
+| Server code turns it **on** for the signed-in user | Allowed; it only removes a way of signing in. Through Desk and REST, only a System Manager can set it either way. |
+| A System Manager turns it on or off | Allowed. Logged as `passwordless_only_changed` (`detail` is `on` or `off`, plus `by <System Manager>`), and the user gets an email saying what changed. |
+| It is changed with `frappe.db.set_value` (scripts, patches) | No hooks run, so nothing is logged or sent. |
+
+A user cannot undo the flag with a step-up either: the point of the flag is that the
+account owner's session alone cannot turn password login back on.
 
 ### Frappe's own "Disable Username/Password Login"
 
@@ -207,9 +233,11 @@ on another device should use an email code, which works anywhere.
 | If… | Then… |
 |---|---|
 | A normal user calls `/api/resource/User Passkey` (create, read, update or delete) | Refused (HTTP 403). Only System Managers have permissions on the doctype. |
-| A user registers a passkey through the Keyless sign-in or settings screens | Works as before. |
+| Anyone, including a System Manager or Administrator, creates a User Passkey from Desk, `/api/resource`, Data Import or a script | Refused. System Managers have no create permission, and the controller refuses any row that does not come from a verified registration (F-2). |
+| A user registers a passkey through the Keyless sign-in or settings screens | Works as before. The row is always for the signed-in user, and its user handle must be that user's. |
+| Someone other than Administrator ends up creating a row for Administrator | Refused, whatever the path. |
 | A user lists or removes **their own** passkey through the Keyless screens | Works as before. |
-| A user tries to remove **someone else's** passkey through the Keyless API | Refused (`PermissionError`). System Managers may remove any passkey. |
+| A user tries to remove **someone else's** passkey through the Keyless API | Refused (`PermissionError`). System Managers may remove any passkey, from the Keyless API, Desk or REST; the owner is told (see Notifications). |
 | Anyone, including a System Manager or server code, changes `user`, `credential_id`, `public_key` or `user_handle` on an existing passkey | Refused (*"Cannot change … of a registered passkey"*). Only the device name can be edited. To move a passkey to another account, delete it and register again. |
 
 ### Signing in with a passkey
@@ -247,6 +275,8 @@ Removing a passkey does not need re-authentication, but it is notified like the 
 | If… | Then… |
 |---|---|
 | A passkey is added or removed, or new backup codes are generated | An email goes to the account owner saying what changed and listing the passkeys now on the account, with a prompt to act if it was not them. It is queued, so a mail failure does not block the change. |
+| A System Manager deletes a passkey from Desk or REST | The same email (before F-2 nothing was sent), and a `passkey_revoked` entry naming who did it. |
+| A System Manager turns Passwordless Only on or off | An email to the user saying so. |
 
 ### Which websites a passkey works from
 
@@ -280,8 +310,22 @@ bench --site <site> execute keyless.security.report_repointed_passkeys
 It lists passkeys whose creator is not the bound user, or whose stored user handle is not
 that user's handle. It also runs once automatically during `bench migrate`, and writes its
 findings to the **Error Log** ("Keyless: review User Passkey ownership").
-It **only reports**; it never changes or deletes anything. A System Manager who registered
-a passkey on someone's behalf also shows up, so review each row before deleting it.
+It **only reports**; it never changes or deletes anything. Before F-2 a System Manager could
+also add a passkey to someone else's account from Desk or REST; such rows show up too, because
+their creator is not the bound user. The report runs once more during the migrate that brings
+F-2. Since F-2 no new row can match this way, so treat any new match as suspicious, but review
+each row before deleting it.
+
+Before F-3, users could turn off their own Passwordless Only. To find who did:
+
+```bash
+bench --site <site> execute keyless.security.report_self_cleared_passwordless_only
+```
+
+It reads the User records' version history (changes saved by the user themselves from on to
+off) and writes its findings to the **Error Log** ("Keyless: review Passwordless Only changes").
+It runs once automatically during the migrate that brings F-3, and only reports. Changes made
+with `frappe.db.set_value` leave no history and are not found.
 
 ---
 
@@ -333,6 +377,8 @@ New or changed events in **Keyless Audit Log**:
 
 | Event | When | Notes |
 |---|---|---|
+| `passwordless_only_changed` | Passwordless Only was turned on or off on a User record, or turning it off was refused (F-3) | `detail` is `on`, `off` or `off refused`, followed by `by <user>` when someone other than the account owner did it. |
+| `passkey_registered` / `passkey_revoked` | A passkey was added or removed | Now logged by the User Passkey record itself, so every path is covered (F-2). `detail` is the passkey's ID, followed by `by <user>` when someone other than the owner did it. |
 | `password_blocked` | A password login or OAuth password grant was blocked | `method` is `password` or `oauth_password`. For an unknown login name, `user` is `Guest` and the typed name is in `detail`. |
 | `factor_blocked` | Email OTP or magic link refused | `detail` is `passkey_required` (System User rule) or `frappe_2fa` (Frappe 2FA applies). |
 | `passkey_failed` | Passkey sign-in refused | New `detail` values: `user_handle_mismatch`, `user_disabled`, and the verification library's message. |
@@ -369,6 +415,16 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Codes are peppered with `encryption_key` from site_config | A new site may not have one yet; Keyless then creates and saves it, as Frappe does for encrypted passwords. It never falls back to `secret_key` or an empty value. **Rotating `encryption_key` invalidates every stored backup code**, so ask users to generate new codes afterwards. |
 | Per-IP limits are much higher; per-account limits now also cover magic links and recovery codes, and count per address and IP with an account-wide backstop of 10 times the limit | Review **Rate Limit per Hour** and **Daily Code Limit per Account**. |
 | The hourly `purge_expired_challenges` job is removed | Nothing; it never did anything. |
+
+From the follow-up audit of 10 October 2026:
+
+| Change | What to do |
+|---|---|
+| A blocked password login caught after the password check now gets *"Invalid login credentials"*, and a request with a stale 2FA `tmp_id` is checked against the form's user (F-1) | Nothing. |
+| System Managers can no longer create User Passkey records from Desk, REST, Data Import or scripts; passkeys only come from the user's own registration (F-2) | If an integration created passkeys directly, it must use the Keyless registration flow instead. Check the Error Log for "Keyless: review User Passkey ownership" after the migrate. |
+| Deleting a passkey from Desk or REST now emails the owner and is logged (F-2) | Nothing; keep the scheduler running so the queued mail goes out. |
+| Passkey add and remove entries are logged by the record, with `by <user>` when someone else acted | Update any alert that matched the old empty `detail`. |
+| The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
 
 ---
 
