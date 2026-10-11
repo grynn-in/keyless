@@ -15,7 +15,7 @@ from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.exceptions import InvalidAuthenticationResponse, InvalidRegistrationResponse
 
 from keyless.api import passkey
-from keyless.tests.security_utils import keyless_settings, reset_rate_limits
+from keyless.tests.security_utils import insert_passkey, keyless_settings, reset_rate_limits
 
 EVIL = "https://evil.example"
 EXTRA = "https://extra.example"
@@ -104,15 +104,14 @@ class TestAuthenticationOrigin(OriginCase):
 			handle = ensure_user_handle("Administrator")
 		self.handle = handle
 		self.credential_id = bytes_to_base64url(secrets.token_bytes(16))
-		frappe.get_doc(
+		insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": "Administrator",
 				"credential_id": self.credential_id,
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 				"user_handle": handle,
 			}
-		).insert(ignore_permissions=True)
+		)
 
 	def _authenticate(self, origin, **settings):
 		self.request(origin)

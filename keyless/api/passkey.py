@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 
-from keyless import notify, stepup
+from keyless import stepup
 from keyless.api.common import allowed_origins, get_passkey_ip_rate_limit, require_enabled, rp_id, rp_name
 from keyless.audit import log_event
 from keyless.auth import issue_session
@@ -184,10 +184,11 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 	if frappe.db.exists("User Passkey", {"credential_id": credential_id}):
 		frappe.throw(_("This passkey is already registered"))
 
+	user = frappe.session.user
 	doc = frappe.get_doc(
 		{
 			"doctype": "User Passkey",
-			"user": frappe.session.user,
+			"user": user,
 			"credential_id": credential_id,
 			"public_key": bytes_to_base64url(verification.credential_public_key),
 			"sign_count": verification.sign_count,
@@ -199,14 +200,13 @@ def verify_registration(credential: str | dict, challenge_id: str, friendly_name
 			"device_type": _authenticator_attachment(cred),
 			"backed_up": 1 if verification.credential_backed_up else 0,
 			"friendly_name": (friendly_name or "").strip() or _default_name(cred),
-			"user_handle": frappe.db.get_value("User", frappe.session.user, "keyless_user_handle"),
+			"user_handle": ensure_user_handle(user),
 		}
 	)
+	# The only way a User Passkey row may be created (audit 2026-10-10, F-2). The
+	# controller logs the new passkey and tells the user.
+	doc.flags.keyless_registered_user = user
 	doc.insert(ignore_permissions=True)
-	log_event("passkey_registered", user=frappe.session.user, method="passkey", success=True)
-	notify.sign_in_methods_changed(
-		frappe.session.user, _('A passkey named "{0}" was added to your account.').format(doc.friendly_name)
-	)
 	return {"ok": True, "name": doc.name, "friendly_name": doc.friendly_name}
 
 
@@ -324,13 +324,9 @@ def revoke_passkey(name: str):
 	doc = frappe.get_doc("User Passkey", name)
 	if doc.user != frappe.session.user and "System Manager" not in frappe.get_roles():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	user = doc.user
 	# Ownership is checked above; the doctype grants no role to end users (C-1).
+	# The controller logs the removal and tells the user.
 	doc.delete(ignore_permissions=True)
-	log_event("passkey_revoked", user=user, method="passkey", success=True, detail=name)
-	notify.sign_in_methods_changed(
-		user, _('The passkey named "{0}" was removed from your account.').format(doc.friendly_name or name)
-	)
 	return {"ok": True}
 
 

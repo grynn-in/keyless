@@ -12,7 +12,14 @@ from frappe.tests.utils import FrappeTestCase
 from webauthn.helpers import bytes_to_base64url
 
 from keyless.api import passkey
-from keyless.tests.security_utils import api_auth_header, delete_user, http, make_user, new_client
+from keyless.tests.security_utils import (
+	api_auth_header,
+	delete_user,
+	http,
+	insert_passkey,
+	make_user,
+	new_client,
+)
 
 LOW_USER = "kl-c1-low@example.com"
 LOCKED_FIELDS = ("user", "credential_id", "public_key", "user_handle")
@@ -37,9 +44,8 @@ class TestUserPasskeyPermissions(FrappeTestCase):
 		super().tearDownClass()
 
 	def _make_passkey(self, user=LOW_USER, owner=LOW_USER):
-		doc = frappe.get_doc(
+		doc = insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": user,
 				"credential_id": bytes_to_base64url(secrets.token_bytes(16)),
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
@@ -47,7 +53,6 @@ class TestUserPasskeyPermissions(FrappeTestCase):
 				"friendly_name": "test key",
 			}
 		)
-		doc.insert(ignore_permissions=True)
 		frappe.db.set_value("User Passkey", doc.name, "owner", owner, update_modified=False)
 		frappe.db.commit()
 		self.addCleanup(self._cleanup, doc.name)
@@ -185,15 +190,14 @@ class TestAssertionUserHandle(FrappeTestCase):
 
 	def setUp(self):
 		self.credential_id = bytes_to_base64url(secrets.token_bytes(16))
-		frappe.get_doc(
+		insert_passkey(
 			{
-				"doctype": "User Passkey",
 				"user": LOW_USER,
 				"credential_id": self.credential_id,
 				"public_key": bytes_to_base64url(secrets.token_bytes(32)),
 				"user_handle": frappe.db.get_value("User", LOW_USER, "keyless_user_handle"),
 			}
-		).insert(ignore_permissions=True)
+		)
 		self.patches = [
 			patch.object(
 				passkey,

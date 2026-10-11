@@ -8,6 +8,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from keyless import notify
 from keyless.api import passkey
 
 USER = "Administrator"
@@ -46,7 +47,7 @@ class TestPasskeyRegistrationDeviceType(FrappeTestCase):
 			patch.object(passkey, "rp_id", return_value="localhost"),
 			patch.object(passkey, "log_event"),
 			patch.object(passkey.stepup, "require"),
-			patch.object(passkey.notify, "sign_in_methods_changed"),
+			patch.object(notify, "sign_in_methods_changed"),
 		]
 		for p in self.patches:
 			p.start()

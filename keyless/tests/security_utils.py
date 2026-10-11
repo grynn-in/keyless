@@ -81,6 +81,20 @@ def api_auth_header(user: str) -> dict:
 	return {"Authorization": f"token {key}:{secret}"}
 
 
+def insert_passkey(fields: dict):
+	"""Insert a User Passkey row as keyless.api.passkey.verify_registration does,
+	without a WebAuthn ceremony. The controller refuses any other insert (audit
+	2026-10-10, F-2). The "passkey added" email is not queued."""
+	from keyless.user import ensure_user_handle
+
+	doc = frappe.get_doc({"doctype": "User Passkey", **fields})
+	doc.user_handle = doc.user_handle or ensure_user_handle(doc.user)
+	doc.flags.keyless_registered_user = doc.user
+	with patch("keyless.notify.sign_in_methods_changed"):
+		doc.insert(ignore_permissions=True)
+	return doc
+
+
 def delete_user(email: str) -> None:
 	for dt in ("User Passkey", "Keyless Backup Code"):
 		frappe.db.delete(dt, {"user": email})

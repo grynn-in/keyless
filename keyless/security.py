@@ -10,11 +10,14 @@ import frappe
 
 
 def find_repointed_passkeys() -> list[dict]:
-	"""User Passkey rows that may have been re-pointed at another account (audit C-1).
+	"""User Passkey rows that may have been re-pointed at another account (audit C-1),
+	or added to it by someone else (audit 2026-10-10, F-2).
 
 	Flags rows whose creator is not the bound user, or whose stored user handle
-	is not the bound user's WebAuthn handle. A System Manager creating a row on
-	someone's behalf also matches the first check, so review rather than delete.
+	is not the bound user's WebAuthn handle. Before F-2 a System Manager could
+	create a row for any user from Desk or REST; such rows match the first
+	check. Since F-2 only the user's own registration can create a row, so a
+	new match needs looking into. Review rather than delete.
 	"""
 	rows = frappe.db.sql(
 		"""
@@ -44,7 +47,7 @@ def report_repointed_passkeys() -> list[dict]:
 		print("Keyless: no suspicious User Passkey rows found.")
 		return rows
 	lines = [f"{r.name}: user={r.user} owner={r.owner} ({'; '.join(r.reasons)})" for r in rows]
-	message = "Review these User Passkey rows (audit C-1):\n" + "\n".join(lines)
+	message = "Review these User Passkey rows (audit C-1, F-2):\n" + "\n".join(lines)
 	print(f"Keyless: {len(rows)} suspicious User Passkey row(s).\n{message}")
 	frappe.log_error(title="Keyless: review User Passkey ownership", message=message)
 	return rows

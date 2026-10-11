@@ -4,3 +4,5 @@
 keyless.patches.v1_0.create_user_handle_custom_field
 keyless.patches.v1_1.report_repointed_passkeys
 keyless.patches.v1_1.warn_passkey_origin
+# Run the report again: before audit 2026-10-10 F-2, System Managers could add passkeys to any account.
+keyless.patches.v1_1.report_repointed_passkeys #2026-10-11
