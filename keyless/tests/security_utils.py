@@ -95,6 +95,21 @@ def insert_passkey(fields: dict):
 	return doc
 
 
+def remove_new_passkeys_after(case, user: str = "Administrator") -> None:
+	"""Delete, when `case`'s test ends, the passkey rows for `user` it created.
+	keyless_settings() commits, so a rollback alone leaves them on the site."""
+	before = set(frappe.get_all("User Passkey", filters={"user": user}, pluck="name"))
+
+	def cleanup():
+		frappe.db.rollback()
+		new = set(frappe.get_all("User Passkey", filters={"user": user}, pluck="name")) - before
+		if new:
+			frappe.db.delete("User Passkey", {"name": ("in", list(new))})
+			frappe.db.commit()
+
+	case.addCleanup(cleanup)
+
+
 def delete_user(email: str) -> None:
 	for dt in ("User Passkey", "Keyless Backup Code"):
 		frappe.db.delete(dt, {"user": email})

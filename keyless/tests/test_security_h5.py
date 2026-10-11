@@ -15,7 +15,12 @@ from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.exceptions import InvalidAuthenticationResponse, InvalidRegistrationResponse
 
 from keyless.api import passkey
-from keyless.tests.security_utils import insert_passkey, keyless_settings, reset_rate_limits
+from keyless.tests.security_utils import (
+	insert_passkey,
+	keyless_settings,
+	remove_new_passkeys_after,
+	reset_rate_limits,
+)
 
 EVIL = "https://evil.example"
 EXTRA = "https://extra.example"
@@ -54,6 +59,7 @@ class OriginCase(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		reset_rate_limits()
+		remove_new_passkeys_after(self)
 		# These tests cover origins and RP ID, not step-up (M-3).
 		patch.object(passkey.stepup, "require").start()
 		self.addCleanup(patch.stopall)

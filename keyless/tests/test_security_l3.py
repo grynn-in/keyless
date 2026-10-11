@@ -13,7 +13,12 @@ from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.exceptions import InvalidAuthenticationResponse, InvalidRegistrationResponse
 
 from keyless.api import passkey
-from keyless.tests.security_utils import insert_passkey, keyless_settings, reset_rate_limits
+from keyless.tests.security_utils import (
+	insert_passkey,
+	keyless_settings,
+	remove_new_passkeys_after,
+	reset_rate_limits,
+)
 
 INTERNAL = "Unexpected client data origin internal-detail-7f3a"
 ON = {"enabled": 1, "enable_passkeys": 1, "rp_id": "", "allowed_origins": ""}
@@ -23,6 +28,7 @@ class TestWebAuthnErrorText(FrappeTestCase):
 	def setUp(self):
 		reset_rate_limits()
 		frappe.set_user("Administrator")
+		remove_new_passkeys_after(self)
 		self.addCleanup(frappe.db.rollback)
 		set_request(method="POST", path="/api/method/keyless.api.passkey.verify_authentication")
 		frappe.local.request_ip = "127.0.0.1"
