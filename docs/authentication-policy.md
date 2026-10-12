@@ -413,6 +413,15 @@ How entries are written:
 | The request then fails | Its other changes are rolled back, but the audit entry is still written. |
 | The IP address is recorded | It is Frappe's resolved client IP. The raw `X-Forwarded-For` header is never stored. See the README's "Reverse proxy" section. |
 
+Who can change or delete entries:
+
+| If… | Then… |
+|---|---|
+| Anyone, Administrator included, tries to change an entry | Refused. Entries cannot be edited once written. |
+| A System Manager tries to delete an entry | Refused, from Desk, REST or scripts, even if they have granted themselves the permission in Role Permissions Manager (G-8). |
+| Administrator deletes an entry | Allowed. Frappe keeps a copy in **Deleted Document**. |
+| An entry is older than **Audit Retention (days)** in Keyless Settings (default 90) | Keyless's daily job deletes it. Frappe's Log Settings does not manage this log. |
+
 New or changed events in **Keyless Audit Log**:
 
 | Event | When | Notes |
@@ -477,6 +486,12 @@ From the follow-up audit of 10 October 2026:
 | Removing a passkey through `keyless.api.passkey.revoke_passkey` needs a recent sign-in or confirmation, like adding one (G-4) | Nothing for Keyless's own screens. A custom screen or script that calls `revoke_passkey` must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. Deleting a User Passkey from Desk or REST as a System Manager is unchanged. |
 | Removing your own passkey needs a recent sign-in or confirmation, like adding one, whether through `keyless.api.passkey.revoke_passkey` or by deleting the User Passkey record (Desk, list-view bulk Delete, `/api/resource`, `frappe.client.delete`). A System Manager using `revoke_passkey` for someone else's passkey needs it too (G-4) | Nothing for Keyless's own screens. A custom screen or script run from a user's session that removes passkeys must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. A System Manager deleting someone else's User Passkey record from Desk or REST, and server code with no session (`bench console`, patches), are unchanged. |
 | Login-page and magic-link targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
+
+From the audit of 12 October 2026:
+
+| Change | What to do |
+|---|---|
+| System Managers can no longer delete Keyless Audit Log entries, and nobody can edit them (G-8) | Nothing for normal use. To remove entries, sign in as Administrator, or lower **Audit Retention (days)**. |
 
 ---
 
