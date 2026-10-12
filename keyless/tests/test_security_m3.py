@@ -17,6 +17,7 @@ from webauthn.helpers import bytes_to_base64url
 from keyless.api import backup, passkey
 from keyless.tests.security_utils import (
 	delete_user,
+	insert_backup_code,
 	insert_passkey,
 	keyless_settings,
 	make_user,
@@ -124,9 +125,7 @@ class TestStepUpRequired(StepUpCase):
 
 	def test_backup_rotation_refused_without_recent_auth(self):
 		self.sign_in()
-		frappe.get_doc({"doctype": "Keyless Backup Code", "user": USER, "code_hash": "a" * 64}).insert(
-			ignore_permissions=True
-		)
+		insert_backup_code(USER, "ABCDEFGHJK")
 		clear_step_up()
 		self.request("keyless.api.backup.generate_codes")
 		with self.assertRaises(frappe.PermissionError):

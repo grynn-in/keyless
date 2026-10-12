@@ -8,3 +8,4 @@ keyless.patches.v1_1.warn_passkey_origin
 keyless.patches.v1_1.report_repointed_passkeys #2026-10-11
 keyless.patches.v1_1.restrict_user_keyless_fields
 keyless.patches.v2_0.clamp_keyless_settings
+keyless.patches.v2_0.report_unbound_backup_codes

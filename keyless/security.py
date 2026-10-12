@@ -3,6 +3,7 @@
 Run on demand with:
 	bench --site <site> execute keyless.security.report_repointed_passkeys
 	bench --site <site> execute keyless.security.report_self_cleared_passwordless_only
+	bench --site <site> execute keyless.security.report_unbound_backup_codes
 """
 
 from __future__ import annotations
@@ -100,4 +101,43 @@ def report_self_cleared_passwordless_only() -> list[dict]:
 	message = "These users turned off their own Passwordless Only (audit 2026-10-10, F-3):\n" + "\n".join(lines)
 	print(f"Keyless: {len(rows)} self-made Passwordless Only change(s).\n{message}")
 	frappe.log_error(title="Keyless: review Passwordless Only changes", message=message)
+	return rows
+
+
+
+def find_unbound_backup_codes() -> list[dict]:
+	"""Backup codes stored before audit 2026-10-12 G-1 whose creator is not their user.
+
+	generate_codes always ran as the user it made codes for, so a version-1 row
+	created by anyone else was added from Desk, REST or a script, or was moved
+	from another account with frappe.client.set_value. Since G-1 these rows no
+	longer sign anyone in. Used rows are listed too: they may show past misuse.
+	"""
+	return frappe.db.sql(
+		"""
+		select name, user, owner, used, used_on, creation
+		from `tabKeyless Backup Code`
+		where ifnull(hash_version, 0) < 2 and owner != user
+		order by creation
+		""",
+		as_dict=True,
+	)
+
+
+def report_unbound_backup_codes() -> list[dict]:
+	"""Print and log the rows above. Reports only; never modifies or deletes."""
+	rows = find_unbound_backup_codes()
+	if not rows:
+		print("Keyless: no backup code was created by someone other than its user.")
+		return rows
+	lines = [
+		f"{r.name}: user={r.user} owner={r.owner}" + (f" (used {r.used_on})" if r.used else "") for r in rows
+	]
+	message = (
+		"These backup codes were created by someone other than their user, or moved to them, before "
+		"audit 2026-10-12 G-1. They no longer sign anyone in. Check the Keyless Audit Log for "
+		"backup_code sign-ins by these users:\n" + "\n".join(lines)
+	)
+	print(f"Keyless: {len(rows)} backup code(s) not created by their user.\n{message}")
+	frappe.log_error(title="Keyless: review Keyless Backup Code ownership", message=message)
 	return rows

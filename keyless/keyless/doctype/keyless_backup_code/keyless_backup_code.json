@@ -7,6 +7,7 @@
   "field_order": [
     "user",
     "code_hash",
+    "hash_version",
     "used",
     "used_on"
   ],
@@ -31,6 +32,14 @@
       "reqd": 1
     },
     {
+      "default": "1",
+      "description": "1: the hash covers the code only (before audit G-1). 2: it also covers the user's WebAuthn handle.",
+      "fieldname": "hash_version",
+      "fieldtype": "Int",
+      "label": "Hash Version",
+      "read_only": 1
+    },
+    {
       "default": "0",
       "fieldname": "used",
       "fieldtype": "Check",
@@ -46,7 +55,7 @@
     }
   ],
   "links": [],
-  "modified": "2026-09-18 12:00:00.000000",
+  "modified": "2026-10-12 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Keyless",
   "name": "Keyless Backup Code",
@@ -54,11 +63,9 @@
   "owner": "Administrator",
   "permissions": [
     {
-      "create": 1,
       "delete": 1,
       "read": 1,
-      "role": "System Manager",
-      "write": 1
+      "role": "System Manager"
     }
   ],
   "sort_field": "modified",

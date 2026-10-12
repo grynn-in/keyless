@@ -13,6 +13,7 @@ from webauthn.helpers import bytes_to_base64url
 from keyless.api import backup, magic_link, otp, passkey
 from keyless.tests.security_utils import (
 	delete_user,
+	insert_backup_code,
 	insert_passkey,
 	keyless_settings,
 	make_user,
@@ -160,9 +161,7 @@ class TestBackupRedeem(EnumerationCase):
 	def setUp(self):
 		super().setUp()
 		for _ in range(3):
-			frappe.get_doc(
-				{"doctype": "Keyless Backup Code", "user": NO_PASSKEY, "code_hash": backup.digest(secrets.token_hex(5))}
-			).insert(ignore_permissions=True)
+			insert_backup_code(NO_PASSKEY, secrets.token_hex(5).upper())
 		self.addCleanup(frappe.db.rollback)
 
 	def _redeem(self, email):

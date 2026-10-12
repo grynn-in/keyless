@@ -95,6 +95,19 @@ def insert_passkey(fields: dict):
 	return doc
 
 
+def insert_backup_code(user: str, code: str):
+	"""Insert a Keyless Backup Code row for `user` as keyless.api.backup.generate_codes
+	does, without step-up. The controller refuses any other insert (audit
+	2026-10-12, G-1)."""
+	from keyless.api.backup import code_digest
+	from keyless.keyless.doctype.keyless_backup_code.keyless_backup_code import GENERATED_FLAG
+
+	doc = frappe.get_doc({"doctype": "Keyless Backup Code", "user": user, "code_hash": code_digest(user, code)})
+	doc.flags[GENERATED_FLAG] = user
+	doc.insert(ignore_permissions=True)
+	return doc
+
+
 def remove_new_passkeys_after(case, user: str = "Administrator") -> None:
 	"""Delete, when `case`'s test ends, the passkey rows for `user` it created.
 	keyless_settings() commits, so a rollback alone leaves them on the site."""

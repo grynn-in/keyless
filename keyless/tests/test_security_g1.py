@@ -106,21 +106,10 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 		frappe.db.delete(DOCTYPE, {"user": ("in", (MANAGER, TARGET, "Administrator"))})
 		frappe.db.delete(DOCTYPE, {"owner": ("in", (MANAGER, TARGET))})
 		for row in self.admin_rows:
-			frappe.db.sql(
-				"""insert into `tabKeyless Backup Code` (name, user, code_hash, used, used_on, owner,
-					modified_by, creation, modified) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-				(
-					row.name,
-					row.user,
-					row.code_hash,
-					row.used,
-					row.used_on,
-					row.owner,
-					row.modified_by,
-					row.creation,
-					row.modified,
-				),
-			)
+			# Put back Administrator's own codes exactly as they were.
+			columns = ", ".join(f"`{column}`" for column in row)
+			values = ", ".join(["%s"] * len(row))
+			frappe.db.sql(f"insert into `tabKeyless Backup Code` ({columns}) values ({values})", list(row.values()))
 		frappe.db.commit()
 		reset_rate_limits()
 
