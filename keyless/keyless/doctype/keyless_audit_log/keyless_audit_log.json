@@ -24,7 +24,7 @@
       "in_list_view": 1,
       "in_standard_filter": 1,
       "label": "Event",
-      "options": "login\nlogout\nsession_created\notp_requested\notp_failed\nmagic_link_sent\nmagic_link_failed\npasskey_registered\npasskey_failed\npasskey_revoked\nbackup_codes_generated\nbackup_failed\npassword_blocked\npasskey_register_failed\nfactor_blocked\nstep_up\nstep_up_failed\npasswordless_only_changed",
+      "options": "login\nlogout\nsession_created\notp_requested\notp_failed\nmagic_link_sent\nmagic_link_failed\npasskey_registered\npasskey_failed\npasskey_revoked\nbackup_codes_generated\nbackup_failed\npassword_blocked\npasskey_register_failed\nfactor_blocked\nstep_up\nstep_up_failed\npasswordless_only_changed\naudit_retention_changed",
       "reqd": 1
     },
     {

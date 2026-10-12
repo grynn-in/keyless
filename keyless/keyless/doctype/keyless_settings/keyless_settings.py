@@ -19,35 +19,76 @@ SETTING_BOUNDS = {
 	"otp_daily_limit": (1, 1000),
 	"magic_link_expiry_minutes": (2, 60),
 	"step_up_window_minutes": (1, 60),
-	# A negative value would make the purge delete every audit entry.
-	"audit_retention_days": (1, 3650),
+	# A short or negative value lets the daily purge empty the audit log (review of #25).
+	"audit_retention_days": (30, 3650),
 }
+
+# Settings where a stored value of 0 or less becomes the default rather than the
+# floor. For limits the floor is the strict side; for retention it is the side
+# that deletes the most, so a mistaken value must not be read as "keep 30 days".
+NOT_POSITIVE_MEANS_DEFAULT = {"audit_retention_days"}
 
 
 def setting_default(fieldname: str) -> int:
 	return cint(frappe.get_meta("Keyless Settings").get_field(fieldname).default)
 
 
-def clamp_stored_settings() -> list[str]:
+def bounded_value(fieldname: str, stored) -> int:
+	"""The value in force for a stored setting: blank or zero is the default, and
+	anything else outside SETTING_BOUNDS is the nearest bound, except that 0 or
+	less is the default for NOT_POSITIVE_MEANS_DEFAULT."""
+	low, high = SETTING_BOUNDS[fieldname]
+	value = cint(stored)
+	if not value or (value < 0 and fieldname in NOT_POSITIVE_MEANS_DEFAULT):
+		return setting_default(fieldname)
+	return min(max(value, low), high)
+
+
+def audit_retention_days() -> int:
+	"""Retention the purge uses. Applies the bounds to the stored value too, so a
+	value written without validate (SQL, set_single_value, a site not yet
+	migrated) cannot empty the log."""
+	return bounded_value(
+		"audit_retention_days", frappe.db.get_single_value("Keyless Settings", "audit_retention_days")
+	)
+
+
+def log_retention_change(old, new, by: str, method: str) -> None:
+	"""Shortening retention deletes audit entries, so every change is itself audited."""
+	from keyless.audit import log_event
+
+	log_event(
+		"audit_retention_changed",
+		user=frappe.session.user,
+		method=method,
+		success=True,
+		detail=f"{old} -> {new} by {by}",
+	)
+
+
+def clamp_stored_settings() -> tuple[list[str], list[str]]:
 	"""Bring stored numeric settings inside SETTING_BOUNDS without running validate.
 
-	Blank or zero becomes the default (what the app already used); anything else
-	out of range becomes the nearest bound. Returns one line per change."""
-	changes = []
+	Returns (out_of_range, filled): one line per value moved into range, and the
+	names of blank values given their default. A blank value is not out of range:
+	the app already read it as the default, so filling it changes nothing."""
+	out_of_range, filled = [], []
 	for fieldname, (low, high) in SETTING_BOUNDS.items():
 		stored = frappe.db.get_single_value("Keyless Settings", fieldname)
 		value = cint(stored)
-		if not value:
-			new = setting_default(fieldname)
-		else:
-			new = min(max(value, low), high)
+		new = bounded_value(fieldname, stored)
 		if value == new:
 			continue
 		frappe.db.set_single_value("Keyless Settings", fieldname, new)
-		changes.append(f"{fieldname}: {stored!r} -> {new} (allowed {low} to {high})")
-	if changes:
+		if value:
+			out_of_range.append(f"{fieldname}: {stored!r} -> {new} (allowed {low} to {high})")
+		else:
+			filled.append(fieldname)
+		if fieldname == "audit_retention_days":
+			log_retention_change(value, new, by="migrate", method="migrate")
+	if out_of_range or filled:
 		frappe.clear_document_cache("Keyless Settings", "Keyless Settings")
-	return changes
+	return out_of_range, filled
 
 
 class KeylessSettings(Document):
@@ -129,5 +170,10 @@ class KeylessSettings(Document):
 		return origins
 
 	def on_update(self):
+		before = self.get_doc_before_save()
+		old = cint(before.get("audit_retention_days")) if before else 0
+		new = cint(self.audit_retention_days)
+		if old != new:
+			log_retention_change(old, new, by=frappe.session.user, method="settings")
 		frappe.cache.delete_value("keyless:settings")
 		frappe.clear_cache()
