@@ -88,7 +88,7 @@ def redeem(email: str, code: str):
 	rows = frappe.get_all(
 		"Keyless Backup Code",
 		filters={"user": user or "", "used": 0},
-		fields=["name", "code_hash", "hash_version", "owner"],
+		fields=["name", "code_hash", "hash_version", "owner", "modified_by"],
 		limit=CODES_PER_USER,
 	)
 	handle = frappe.db.get_value("User", {"name": user or ""}, "keyless_user_handle") or ""
@@ -101,13 +101,15 @@ def redeem(email: str, code: str):
 			compare(bound, _DUMMY_HASH)
 			continue
 		# A version-1 hash covers the code only. Such a row counts only while
-		# its creator is its user, as generate_codes made it: rows a System
-		# Manager created for, or re-pointed at, another user before G-1 do
-		# not. Renaming a user renames `owner` too, so renames keep working.
+		# its creator and its last editor are its user, as generate_codes left
+		# it: unused rows are never saved again (the controller refuses it), so
+		# a row a System Manager created for another user, or moved with
+		# set_value or PUT (even setting `owner` too), does not count. Renaming
+		# a user rewrites `owner` and `modified_by`, so renames keep working.
 		if cint(row.hash_version) >= HASH_VERSION:
 			ok = compare(bound, row.code_hash)
 		else:
-			ok = compare(normalized, row.code_hash) and row.owner == user
+			ok = compare(normalized, row.code_hash) and row.owner == user and row.modified_by == user
 		if ok and match is None:
 			match = row
 	if not match:

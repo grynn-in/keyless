@@ -18,10 +18,6 @@ GENERATED_FLAG = "keyless_generated_for"
 # a row moved to another user no longer matches (audit 2026-10-12, G-1).
 HASH_VERSION = 2
 
-# Binding between a code and its owner. Changing any of these after insert
-# would let a code sign in someone else, or be used again.
-LOCKED_FIELDS = ("user", "code_hash", "hash_version", "owner")
-
 
 class KeylessBackupCode(Document):
 	# begin: auto-generated types
@@ -52,32 +48,47 @@ class KeylessBackupCode(Document):
 		self.used_on = None
 
 	def validate(self):
-		if self.is_new():
-			return
-		stored = frappe.db.get_value(
-			"Keyless Backup Code", self.name, (*LOCKED_FIELDS, "used", "used_on"), as_dict=True
-		)
-		if not stored:
-			return
-		changed = [f for f in LOCKED_FIELDS if (self.get(f) or None) != (stored.get(f) or None)]
-		if stored.used and (not self.used or str(self.used_on or "") != str(stored.used_on or "")):
-			changed.append("used")
-		if changed:
+		# Every field of a code binds it to its user or records its use, so an
+		# existing row is never saved again: not by Desk, REST, a script or a
+		# role given write with a Custom DocPerm. Redeeming marks a code used
+		# with frappe.db.set_value, which does not run this check. A legitimate
+		# unused row is therefore never re-saved, and redeem relies on that for
+		# rows stored before G-1 (audit 2026-10-12, G-1).
+		if not self.is_new():
 			frappe.throw(
-				_("Cannot change {0} of a backup code").format(", ".join(changed)),
+				_("Backup codes cannot be changed. Generate new ones instead."),
 				frappe.ValidationError,
 			)
 
 	def after_delete(self):
 		# generate_codes and deleting a user remove rows without hooks, so this
 		# covers a System Manager deleting codes from Desk or REST, which used
-		# to be silent.
+		# to be silent. Every row is logged; the user gets one email per request.
 		actor = frappe.session.user
 		detail = self.name if actor == self.user else f"{self.name} by {actor}"
 		log_event("backup_code_deleted", user=self.user, method="backup", success=True, detail=detail)
-		notify.sign_in_methods_changed(
-			self.user,
-			_("A backup code was deleted from your account.")
-			if actor == self.user
-			else _("A backup code was deleted from your account by {0}.").format(actor),
-		)
+		_notify_once(self.user, actor)
+
+
+def _notify_once(user: str, actor: str) -> None:
+	"""Email `user` about a deleted backup code once per request or job.
+
+	Desk's bulk delete removes up to ten rows in one request and commits after
+	each, so the mail is queued in the transaction of the first deletion (and
+	rolled back with it) and later deletions for the same user are skipped.
+	"""
+	notified = getattr(frappe.local, "keyless_backup_code_deleted_notified", None)
+	if notified is None:
+		notified = frappe.local.keyless_backup_code_deleted_notified = set()
+	if user in notified:
+		return
+	notified.add(user)
+	# If this transaction is rolled back, the queued mail goes with it: let a
+	# later deletion in the same request send it.
+	frappe.db.after_rollback.add(lambda: notified.discard(user))
+	notify.sign_in_methods_changed(
+		user,
+		_("Backup codes were deleted from your account.")
+		if actor == user
+		else _("Backup codes were deleted from your account by {0}.").format(actor),
+	)
