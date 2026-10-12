@@ -417,10 +417,16 @@ Who can change or delete entries:
 
 | If… | Then… |
 |---|---|
-| Anyone, Administrator included, tries to change an entry | Refused. Entries cannot be edited once written. |
-| A System Manager tries to delete an entry | Refused, from Desk, REST or scripts, even if they have granted themselves the permission in Role Permissions Manager (G-8). |
+| Anyone, Administrator included, tries to change an entry through the document (Desk, REST, `frappe.client.set_value`, `doc.save`) | Refused. Entries cannot be edited once written. |
+| A System Manager tries to delete an entry through the document (Desk, REST, `frappe.delete_doc`) | Refused, even if they have granted themselves the permission in Role Permissions Manager (G-8). |
 | Administrator deletes an entry | Allowed. Frappe keeps a copy in **Deleted Document**. |
 | An entry is older than **Audit Retention (days)** in Keyless Settings (default 90) | Keyless's daily job deletes it. Frappe's Log Settings does not manage this log. |
+
+The guarantee is at the document layer. It does not stop code that skips the document:
+
+- When server scripts are enabled, a System Manager can use the System Console or a Server Script to call `frappe.delete_doc(..., ignore_on_trash=True)` or `frappe.db.set_value`, which bypass these checks. Keep server scripts disabled unless you need them.
+- A System Manager can delete the **Deleted Document** copy that an Administrator deletion leaves.
+- A System Manager who grants themselves create permission on Keyless Audit Log can add rows that look like real events.
 
 New or changed events in **Keyless Audit Log**:
 
@@ -487,11 +493,11 @@ From the follow-up audit of 10 October 2026:
 | Removing your own passkey needs a recent sign-in or confirmation, like adding one, whether through `keyless.api.passkey.revoke_passkey` or by deleting the User Passkey record (Desk, list-view bulk Delete, `/api/resource`, `frappe.client.delete`). A System Manager using `revoke_passkey` for someone else's passkey needs it too (G-4) | Nothing for Keyless's own screens. A custom screen or script run from a user's session that removes passkeys must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. A System Manager deleting someone else's User Passkey record from Desk or REST, and server code with no session (`bench console`, patches), are unchanged. |
 | Login-page and magic-link targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
 
-From the audit of 12 October 2026:
+### From the audit of 12 October 2026
 
 | Change | What to do |
 |---|---|
-| System Managers can no longer delete Keyless Audit Log entries, and nobody can edit them (G-8) | Nothing for normal use. To remove entries, sign in as Administrator, or lower **Audit Retention (days)**. |
+| System Managers can no longer delete Keyless Audit Log entries through the document, and nobody can edit them (G-8) | Nothing for normal use. To remove entries, sign in as Administrator. Changes to **Audit Retention (days)** are audited, and its minimum is 30 days. |
 
 ---
 

@@ -149,6 +149,7 @@ class TestAuditLogIsImmutable(FrappeTestCase):
 
 		# A request with no after_response: the row goes into this transaction.
 		set_request(method="POST", path="/api/method/ping")
+		self.addCleanup(setattr, frappe.local, "request", None)
 		log_event("logout", user=SUBJECT, success=True, detail="kl-g8-new")
 		frappe.db.commit()
 		self.assertTrue(frappe.db.exists("Keyless Audit Log", {"user": SUBJECT, "detail": "kl-g8-new"}))
