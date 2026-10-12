@@ -353,6 +353,7 @@ person to a page after sign-in.
 |---|---|
 | A path on this site starting with a single `/`, e.g. `/app/todo?x=1` | Used as given. |
 | Another site (`https://evil.com`, `//evil.com`), a backslash form (`/\evil.com`), a scheme (`javascript:`), a bare name (`app/todo`) or anything with control characters | Ignored. The person lands on the default page: Desk for System Users, the website home page for Website Users. |
+| A path whose `.` or `..` segments or encoded slashes resolve to another site, e.g. `/.//evil.com`, `/a/..//evil.com`, `/%2e//evil.com`, `/%2F%2Fevil.com` | Ignored, as above. Browsers collapse these segments, so the path would otherwise be read as `//evil.com`. The login page script applies the same check to `redirect-to` and navigates to the full same-site URL. |
 
 Magic links:
 
@@ -420,6 +421,7 @@ Run `bench --site <site> migrate` after updating. Then check:
 | Users with Frappe 2FA can no longer sign in with email OTP or magic links | Make sure they have a passkey (or backup codes) before upgrading, or they will need a password plus Frappe 2FA. |
 | Passkeys only work from the configured site URL and **Allowed Origins** | If users reach the site on another domain or port, set `host_name` in site_config or add the origin to Allowed Origins. Otherwise passkey sign-in fails. |
 | Login-page and magic-link targets must be same-site paths | Nothing for normal use. Links or integrations that pass full URLs as `redirect-to` now land on the default page. |
+| Targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
 | Magic links need one extra click | Tell users the link opens a "Sign in" page with a button. |
 | Magic links only work in the browser they were requested from | Tell users to open the link on the same device and browser, or use an email code. If the mail app opens links in another browser, the link is refused there. |
 | Codes and links are mailed after the response, and sent at once | Nothing; they no longer wait for the email queue. Notifications about sign-in method changes are still queued, so keep the scheduler running. Mail failures are no longer shown to users. |
