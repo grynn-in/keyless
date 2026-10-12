@@ -91,7 +91,7 @@ def redeem(email: str, code: str):
 		fields=["name", "code_hash", "hash_version", "owner"],
 		limit=CODES_PER_USER,
 	)
-	handle = frappe.db.get_value("User", user or "", "keyless_user_handle") or ""
+	handle = frappe.db.get_value("User", {"name": user or ""}, "keyless_user_handle") or ""
 	normalized = (code or "").strip().upper()
 	bound = _bound(handle, normalized)
 	match = None
