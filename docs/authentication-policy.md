@@ -426,6 +426,12 @@ From the follow-up audit of 10 October 2026:
 | Passkey add and remove entries are logged by the record, with `by <user>` when someone else acted | Update any alert that matched the old empty `detail`. |
 | The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
 
+From the audit of 12 October 2026:
+
+| Change | What to do |
+|---|---|
+| Keyless requires cbor2 5.9.0 or later, which the passkey library uses to read what the browser sends (G-6; CVE-2026-26209) | Run `bench setup requirements` (or `pip install -U "cbor2>=5.9.0"` in the bench env) before `bench migrate`, then restart. |
+
 ---
 
 ## 9. Decisions behind this behaviour

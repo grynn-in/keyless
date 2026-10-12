@@ -9,6 +9,9 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     "webauthn>=2.1.0,<3",
+    # py_webauthn decodes CBOR from the browser; cbor2 before 5.9.0 recurses
+    # without limit on nested input (CVE-2026-26209).
+    "cbor2>=5.9.0",
 ]
 
 [build-system]
