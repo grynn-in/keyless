@@ -57,16 +57,18 @@ def redeem(email: str, code: str) -> list[str]:
 	return signed_in
 
 
-def insert_legacy_row(user: str, code: str, owner: str) -> str:
+def insert_legacy_row(user: str, code: str, owner: str, modified_by: str | None = None, used: int = 0) -> str:
 	"""A row as Keyless 2.0.0 stored it: the hash covers the code only, and the
-	row's creator is whoever inserted it (the user, for generate_codes)."""
+	row's creator and last editor are whoever inserted it (the user, for
+	generate_codes). Redeeming sets `used` with frappe.db.set_value, which makes
+	the last editor Guest."""
 	name = frappe.generate_hash(length=10)
 	stamp = now()
 	frappe.db.sql(
 		"""insert into `tabKeyless Backup Code`
 			(name, user, code_hash, used, owner, modified_by, creation, modified)
-		values (%s, %s, %s, 0, %s, %s, %s, %s)""",
-		(name, user, digest(code), owner, owner, stamp, stamp),
+		values (%s, %s, %s, %s, %s, %s, %s, %s)""",
+		(name, user, digest(code), used, owner, modified_by or owner, stamp, stamp),
 	)
 	return name
 
@@ -79,11 +81,19 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 		make_user(MANAGER, user_type="System User", roles=("System Manager",))
 		make_user(TARGET)
 		cls.headers = api_auth_header(MANAGER)
+		# Generating codes for Administrator gives it a WebAuthn handle and audit
+		# entries; tearDownClass removes what this class added.
+		cls.started = now()
+		cls.admin_handle = frappe.db.get_value("User", "Administrator", "keyless_user_handle")
+		frappe.db.commit()
 
 	@classmethod
 	def tearDownClass(cls):
 		frappe.set_user("Administrator")
 		frappe.db.delete("Keyless Audit Log", {"user": ("in", (MANAGER, TARGET))})
+		frappe.db.delete("Keyless Audit Log", {"user": "Administrator", "creation": (">=", cls.started)})
+		if not cls.admin_handle:
+			frappe.db.set_value("User", "Administrator", "keyless_user_handle", None, update_modified=False)
 		delete_user(MANAGER)
 		delete_user(TARGET)
 		frappe.db.commit()
@@ -186,15 +196,74 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 				self.assertNotEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
 				self.assertEqual(frappe.db.get_value(DOCTYPE, name, ["user", "code_hash", "used"], as_dict=True), before)
 
+	def test_system_manager_cannot_move_a_code_with_its_creator_via_rest(self):
+		# Moving the user and the creator in one request would make the row look
+		# as if generate_codes had made it for the new user.
+		name, code = self.own_row()
+		frappe.db.commit()
+		fields = ["user", "owner", "modified_by", "code_hash"]
+		before = frappe.db.get_value(DOCTYPE, name, fields, as_dict=True)
+		for user in (TARGET, "Administrator"):
+			moved = {"user": user, "owner": user}
+			with self.subTest(path="set_value", user=user):
+				response = http(
+					new_client(),
+					"post",
+					"/api/method/frappe.client.set_value",
+					json={"doctype": DOCTYPE, "name": name, "fieldname": moved},
+					headers=self.headers,
+				)
+				frappe.db.rollback()
+				self.assertNotEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
+				self.assertEqual(frappe.db.get_value(DOCTYPE, name, fields, as_dict=True), before)
+			with self.subTest(path="resource", user=user):
+				response = http(
+					new_client(), "put", f"/api/resource/{DOCTYPE}/{name}", json=moved, headers=self.headers
+				)
+				frappe.db.rollback()
+				self.assertNotEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
+				self.assertEqual(frappe.db.get_value(DOCTYPE, name, fields, as_dict=True), before)
+			self.assertEqual(redeem(user, code), [])
+
 	def test_server_code_cannot_change_a_code(self):
-		name, _code = self.own_row()
-		frappe.db.set_value(DOCTYPE, name, {"used": 1})
-		for field, value in (("user", TARGET), ("user", "Administrator"), ("code_hash", "b" * 64), ("used", 0)):
-			with self.subTest(field=field, value=value):
-				doc = frappe.get_doc(DOCTYPE, name)
-				doc.set(field, value)
-				with self.assertRaises(frappe.ValidationError):
-					doc.save(ignore_permissions=True)
+		# Desk, a script, or a role given write with a Custom DocPerm. Redeeming
+		# marks a code used with frappe.db.set_value, which skips the controller.
+		changes = (
+			("user", TARGET),
+			("user", "Administrator"),
+			("owner", TARGET),
+			("code_hash", "b" * 64),
+			("hash_version", 1),
+			("used", 0),
+			("used", 1),
+			("used_on", "2026-01-01 00:00:00"),
+		)
+		for used in (0, 1):
+			name, _code = self.own_row()
+			if used:
+				frappe.db.set_value(DOCTYPE, name, {"used": 1, "used_on": now()})
+			fields = ["user", "owner", "code_hash", "hash_version", "used", "used_on"]
+			before = frappe.db.get_value(DOCTYPE, name, fields, as_dict=True)
+			for field, value in changes:
+				with self.subTest(used=used, field=field, value=value):
+					doc = frappe.get_doc(DOCTYPE, name)
+					doc.set(field, value)
+					if doc.get(field) == before.get(field):
+						continue
+					with self.assertRaises(frappe.ValidationError):
+						doc.save(ignore_permissions=True)
+					self.assertEqual(frappe.db.get_value(DOCTYPE, name, fields, as_dict=True), before)
+			frappe.db.delete(DOCTYPE, {"name": name})
+
+	def test_server_code_cannot_burn_an_unused_code(self):
+		# Marking a code used through the document would silently take it away
+		# from its user.
+		name, code = self.own_row()
+		doc = frappe.get_doc(DOCTYPE, name)
+		doc.used = 1
+		with self.assertRaises(frappe.ValidationError):
+			doc.save(ignore_permissions=True)
+		self.assertEqual(redeem(MANAGER, code), [MANAGER])
 
 	# --- redeeming -------------------------------------------------------------
 
@@ -224,6 +293,15 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 		self.assertEqual(redeem(TARGET, "LEGACY2345"), [TARGET])
 		self.assertEqual(redeem(TARGET, "LEGACY2345"), [])
 
+	def test_legacy_code_moved_with_its_creator_does_not_sign_in(self):
+		# Before G-1 a System Manager could set `user` and `owner` together with
+		# frappe.client.set_value or PUT /api/resource. The save made them the
+		# row's last editor; generate_codes rows are never saved again.
+		for user in (TARGET, "Administrator"):
+			with self.subTest(user=user):
+				insert_legacy_row(user, "MOVED23456", owner=user, modified_by=MANAGER)
+				self.assertEqual(redeem(user, "MOVED23456"), [])
+
 	def test_legacy_code_created_for_someone_else_does_not_sign_in(self):
 		# A row a System Manager created for, or re-pointed at, another user
 		# before this fix: its creator is not its user.
@@ -236,10 +314,15 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 		from keyless.security import find_unbound_backup_codes
 
 		moved = insert_legacy_row(TARGET, "MOVED23456", owner=MANAGER)
+		moved_with_owner = insert_legacy_row(TARGET, "MOVED34567", owner=TARGET, modified_by=MANAGER)
 		own = insert_legacy_row(TARGET, "LEGACY2345", owner=TARGET)
+		# Redeemed: frappe.db.set_value made Guest its last editor.
+		own_used = insert_legacy_row(TARGET, "LEGACY3456", owner=TARGET, modified_by="Guest", used=1)
 		found = {row.name for row in find_unbound_backup_codes()}
 		self.assertIn(moved, found)
+		self.assertIn(moved_with_owner, found)
 		self.assertNotIn(own, found)
+		self.assertNotIn(own_used, found)
 
 	# --- deleting rows ---------------------------------------------------------
 
@@ -260,3 +343,32 @@ class TestBackupCodesOnlyFromGeneration(FrappeTestCase):
 		recipients = [str(call.kwargs.get("recipients")) for call in sendmail.call_args_list]
 		self.assertTrue(any(TARGET in r for r in recipients), recipients)
 
+	def test_bulk_delete_sends_one_email_per_user(self):
+		# Desk's list view deletes up to ten rows in one request and commits
+		# after each. Every row is logged; each user gets one email.
+		generate_for(TARGET)
+		generate_for(MANAGER)
+		names = frappe.get_all(DOCTYPE, {"user": TARGET}, pluck="name")[:3]
+		names += frappe.get_all(DOCTYPE, {"user": MANAGER}, pluck="name")[:2]
+		frappe.db.commit()
+		with patch("frappe.sendmail") as sendmail:
+			response = http(
+				new_client(),
+				"post",
+				"/api/method/frappe.desk.reportview.delete_items",
+				data={"doctype": DOCTYPE, "items": frappe.as_json(names)},
+				headers=self.headers,
+			)
+		self.assertEqual(response.status_code, 200, response.get_data(as_text=True)[:300])
+		frappe.db.rollback()
+		self.assertFalse(frappe.db.exists(DOCTYPE, {"name": ("in", names)}))
+		logged = frappe.get_all(
+			"Keyless Audit Log", {"event": "backup_code_deleted", "user": ("in", (MANAGER, TARGET))}, pluck="detail"
+		)
+		for name in names[:3]:
+			self.assertIn(f"{name} by {MANAGER}", logged)
+		for name in names[3:]:
+			self.assertIn(name, logged)
+		recipients = [str(call.kwargs.get("recipients")) for call in sendmail.call_args_list]
+		self.assertEqual(sum(TARGET in r for r in recipients), 1, recipients)
+		self.assertEqual(sum(MANAGER in r for r in recipients), 1, recipients)
