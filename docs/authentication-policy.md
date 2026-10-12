@@ -170,12 +170,15 @@ HTTP 429, *"Too many attempts. Try again later."*
 
 Anyone who knows an address could use up a limit on it, so limits on requests and on
 recovery codes count per address **and client IP**: a stranger hitting the limit from their
-machine does not stop the owner signing in from theirs. The same address may make **10
-times** the limit in total, from all IPs together, before it is refused everywhere; that
-backstop is what bounds an attacker who has many IPs. Wrong guesses at a sign-in code are
-the exception: they count per address only, because that limit is what keeps a 6-digit code
-from being guessed, and it must not grow with the number of IPs an attacker has. Someone
-refused there can still sign in with a magic link or a passkey.
+machine does not stop the owner signing in from theirs. An IPv4 address counts on its own;
+an IPv6 address counts as its **/64 network**, because one IPv6 host is normally given a
+whole /64 and could otherwise send every request from a new address. The same address may
+make **10 times** the limit in total, from all IPs together, before it is refused
+everywhere; that backstop is what bounds an attacker who has many IPs. Wrong guesses at a
+sign-in code are the exception: they count per address only, because that limit is what
+keeps a 6-digit code from being guessed, and it must not grow with the number of IPs an
+attacker has. So a stranger **can** use up the wrong-guess limit for an address from one
+machine; the owner refused there can still sign in with a magic link or a passkey.
 
 Every attempt is counted before it is checked, so parallel requests cannot together get
 past a limit. Correct codes are given back, so signing in does not use up the budget for
@@ -197,6 +200,8 @@ wrong guesses.
 Limits per client IP only stop floods from one address, so that a whole office behind one
 IP is not locked out: 20 times **Rate Limit per Hour** for code, link and recovery-code
 requests (100 by default), and 200 times for passkey sign-in (1000 by default).
+These flood limits are Frappe's own `rate_limit`, which counts each IPv6 address
+separately.
 
 ### Allowed values for the numeric settings
 
@@ -533,6 +538,7 @@ From the follow-up audit of 10 October 2026:
 | New codes are stored with a hash bound to the user (`hash_version` 2) | Nothing. Existing codes keep working for their own user; users do not need to generate new ones. |
 | Codes stored before G-1 that their user did not generate stop working: the creator, or for an unused code the last editor, is someone else | Check the Error Log for "Keyless: review Keyless Backup Code ownership" after the migrate. Users listed there can generate new codes. |
 | Deleting backup codes from Desk or REST is logged per code and emails the user once per request | Nothing; keep the scheduler running so the queued mail goes out. |
+| Limits counted per address and client IP count an IPv6 client by its /64 network (G-5, audit of 12 October 2026) | Nothing for most sites. People who share one IPv6 /64 and the same email address now share its per-IP limit, as people behind one IPv4 address already did. |
 
 ---
 
