@@ -324,6 +324,10 @@ def revoke_passkey(name: str):
 	doc = frappe.get_doc("User Passkey", name)
 	if doc.user != frappe.session.user and "System Manager" not in frappe.get_roles():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	# Removing a passkey changes how the account signs in, so it needs a recent
+	# sign-in or confirmation, as adding one does (G-4). Otherwise a stolen
+	# session could strip the owner's passkeys.
+	stepup.require()
 	# Ownership is checked above; the doctype grants no role to end users (C-1).
 	# The controller logs the removal and tells the user.
 	doc.delete(ignore_permissions=True)

@@ -255,7 +255,7 @@ used to sign in (Keyless has always registered discoverable ones).
 | The handle matches and the signature verifies | Signed in. |
 | Verification fails for any reason | *"Could not verify this passkey."* The technical reason is only in the audit log (`detail`). |
 
-### Adding a passkey or generating new backup codes
+### Adding or removing a passkey, or generating new backup codes
 
 These changes need **recent re-authentication**: within the **Step-up Window** (default 5
 minutes).
@@ -268,7 +268,19 @@ minutes).
 | None of these | Refused (*"Confirm it's you before changing how you sign in."*). In Desk, Keyless asks them to confirm with a passkey, or else an emailed code, and then continues. With neither available, they must sign out and in again. |
 | They try to confirm with someone else's passkey | Refused. |
 
-Removing a passkey does not need re-authentication, but it is notified like the changes below.
+Removing a passkey through the Keyless API (`keyless.api.passkey.revoke_passkey`) follows the
+same rule (G-4), for the owner and for a System Manager removing someone else's passkey. Keyless's
+own Desk screens have no "remove passkey" button; a custom screen that calls `revoke_passkey`
+should call `keyless.ensure_recent_auth()` first, as the Register Passkey button does, or it gets
+the refusal above.
+
+A System Manager deleting a User Passkey record from Desk (the record's Delete action) or
+`/api/resource` does **not** need re-authentication. That is an administrator removing a
+credential, for example from a lost device; it is logged and the owner is emailed (see
+Notifications).
+
+Removing a passkey does not end the account's other signed-in sessions; they stay valid
+until they expire or the user signs out of them.
 
 ### Notifications
 
@@ -432,6 +444,7 @@ From the follow-up audit of 10 October 2026:
 |---|---|
 | Keyless requires cbor2 5.9.0 or later, but below 6. The passkey library uses cbor2 to read what the browser sends (G-6; CVE-2026-26209). cbor2 6 is a breaking rewrite; the passkey library version Keyless uses was built on cbor2 5 | Run `bench setup requirements` before `bench migrate`, then restart. To upgrade cbor2 by hand, run `pip install "cbor2>=5.9.0,<6"` in the bench env. Do not run `pip install -U cbor2`: it installs cbor2 6. |
 | The magic-link browser cookie now lasts exactly **Magic Link Expiry** in every site time zone (G-3). Before, its expiry was the site's local time read as UTC: on sites west of UTC the cookie had already expired, so every magic link was refused as "another browser"; east of UTC it outlived the link by the UTC offset | Nothing. On sites west of UTC, tell users magic links work again. |
+| Removing a passkey through `keyless.api.passkey.revoke_passkey` needs a recent sign-in or confirmation, like adding one (G-4) | Nothing for Keyless's own screens. A custom screen or script that calls `revoke_passkey` must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. Deleting a User Passkey from Desk or REST as a System Manager is unchanged. |
 
 ---
 

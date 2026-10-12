@@ -1,4 +1,4 @@
-"""Step-up: confirm it's you before adding a passkey or regenerating backup codes
+"""Step-up: confirm it's you before adding or removing a passkey or regenerating backup codes
 (audit M-3, D7). A fresh sign-in also counts; see keyless.stepup."""
 
 from __future__ import annotations
