@@ -198,6 +198,25 @@ Limits per client IP only stop floods from one address, so that a whole office b
 IP is not locked out: 20 times **Rate Limit per Hour** for code, link and recovery-code
 requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 
+### Allowed values for the numeric settings
+
+Keyless Settings refuses to save a number outside these ranges, with *"<setting> must be
+between <low> and <high>"*. A blank field means the default; saving writes the default in.
+
+| Setting | Allowed | Default | Why the bound |
+|---|---|---|---|
+| **OTP Length** | 6 to 8 | 6 | Shorter codes can be guessed within the limits; the login page takes at most 8 digits. |
+| **OTP Expiry (seconds)** | 60 to 3600 | 300 | |
+| **Max OTP Attempts** | 1 to 10 | 5 | Each account gets twice this many wrong guesses an hour. |
+| **Rate Limit per Hour** | 1 to 100 | 5 | The per-IP limits are 20 and 200 times this. |
+| **Daily Code Limit per Account** | 1 to 1000 | 10 | |
+| **Magic Link Expiry (minutes)** | 2 to 60 | 10 | |
+| **Step-up Window (minutes)** | 1 to 60 | 5 | |
+| **Audit Retention (days)** | 1 to 3650 | 90 | A negative value made the daily purge delete every audit entry. |
+
+Before F-9, negative values were accepted. A negative limit refused every request, so it
+switched the factor off rather than lifting the limit.
+
 ### What people see when they request a code or link
 
 | If… | Then… |
@@ -441,6 +460,7 @@ From the follow-up audit of 10 October 2026:
 | Deleting a passkey from Desk or REST now emails the owner and is logged (F-2) | Nothing; keep the scheduler running so the queued mail goes out. |
 | Passkey add and remove entries are logged by the record, with `by <user>` when someone else acted | Update any alert that matched the old empty `detail`. |
 | The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
+| Numeric settings must be inside fixed ranges (section 3, "Allowed values for the numeric settings"); OTP Length is at least 6 (F-9) | The migrate changes any stored value outside its range to the nearest bound, and a blank one to its default, and lists each change in the Error Log ("Keyless: settings out of range"). Check the list: a site that used 4-digit codes now sends 6-digit codes. The migrate never stops over this; if the check itself fails it logs "Keyless: settings bounds patch failed". |
 
 ### From the audit of 12 October 2026
 
