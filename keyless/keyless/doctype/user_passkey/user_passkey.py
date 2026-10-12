@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from keyless import notify
+from keyless import notify, stepup
 from keyless.audit import log_event
 
 # Binding between a credential and its owner. Changing any of these after
@@ -75,6 +75,16 @@ class UserPasskey(Document):
 	def on_trash(self):
 		if self.user != frappe.session.user and "System Manager" not in frappe.get_roles():
 			frappe.throw(_("Not permitted"), frappe.PermissionError)
+		# Removing your own passkey needs a recent sign-in or confirmation, by
+		# every path: revoke_passkey, Desk Delete, /api/resource,
+		# frappe.client.delete, and Desk's bulk delete, which runs as a
+		# background job. Otherwise a stolen Administrator or System Manager
+		# session could strip that administrator's own passkeys (G-4). A
+		# System Manager removing someone else's passkey here does not need it
+		# (logged and the owner emailed), nor does server code with no session
+		# behind it (bench console, patches, migrate).
+		if self.user == frappe.session.user and _acting_for_a_session():
+			stepup.require()
 
 	def after_delete(self):
 		# Also covers a System Manager deleting from Desk or REST, which used to
@@ -90,3 +100,8 @@ class UserPasskey(Document):
 		"""`detail`, plus who did it when that is not the passkey's owner."""
 		actor = frappe.session.user
 		return detail if actor == self.user else f"{detail} by {actor}"
+
+
+def _acting_for_a_session() -> bool:
+	"""True inside a web request or a background job queued from one."""
+	return bool(getattr(frappe.local, "request", None) or getattr(frappe.local, "job", None))
