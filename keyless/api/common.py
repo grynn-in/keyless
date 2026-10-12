@@ -64,7 +64,8 @@ def client_network(ip: str | None = None) -> str:
 
 	`ip` defaults to Frappe's resolved client IP. An IPv4 address written as IPv6
 	(::ffff:a.b.c.d) counts as that IPv4 address. A value that is not an IP address
-	is used as it is, so it still gets a bucket of its own.
+	is used as it is, so it still gets a bucket of its own. 6to4, Teredo and
+	IPv4-compatible addresses are not unwrapped; they count by their /64 too.
 	"""
 	if ip is None:
 		ip = getattr(frappe.local, "request_ip", None) or ""

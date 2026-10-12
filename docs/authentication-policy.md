@@ -172,7 +172,13 @@ Anyone who knows an address could use up a limit on it, so limits on requests an
 recovery codes count per address **and client IP**: a stranger hitting the limit from their
 machine does not stop the owner signing in from theirs. An IPv4 address counts on its own;
 an IPv6 address counts as its **/64 network**, because one IPv6 host is normally given a
-whole /64 and could otherwise send every request from a new address. The same address may
+whole /64 and could otherwise send every request from a new address. An IPv4 address
+written as IPv6 (`::ffff:a.b.c.d`) counts as the IPv4 address. Many homes and offices get
+a /56 or /48, so one of them can still appear as many clients (256 or 65,536 /64s), and
+so can a host using 6to4 (`2002::/16`, a /48 for each IPv4 address). Only the account-wide
+backstop below bounds those. Teredo (`2001::/32`) and the old IPv4-compatible form
+(`::a.b.c.d`) are not unwrapped either: they are counted by their /64 like any other IPv6
+address, so all Teredo clients of one Teredo server share a bucket. The same address may
 make **10 times** the limit in total, from all IPs together, before it is refused
 everywhere; that backstop is what bounds an attacker who has many IPs. Wrong guesses at a
 sign-in code are the exception: they count per address only, because that limit is what
@@ -539,6 +545,7 @@ From the follow-up audit of 10 October 2026:
 | Codes stored before G-1 that their user did not generate stop working: the creator, or for an unused code the last editor, is someone else | Check the Error Log for "Keyless: review Keyless Backup Code ownership" after the migrate. Users listed there can generate new codes. |
 | Deleting backup codes from Desk or REST is logged per code and emails the user once per request | Nothing; keep the scheduler running so the queued mail goes out. |
 | Limits counted per address and client IP count an IPv6 client by its /64 network (G-5, audit of 12 October 2026) | Nothing for most sites. People who share one IPv6 /64 and the same email address now share its per-IP limit, as people behind one IPv4 address already did. |
+| Limits counted per address and client IP count an IPv6 client by its /64 network (G-5) | Nothing for most sites. People who share one IPv6 /64 and the same email address now share its per-IP limit, as people behind one IPv4 address already did. |
 
 ---
 
