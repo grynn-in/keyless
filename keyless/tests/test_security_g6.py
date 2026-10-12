@@ -1,7 +1,10 @@
 """G-6 (audit of 12 October 2026): py_webauthn decodes attacker-supplied CBOR at
 passkey sign-in and registration, and only asks for cbor2 >= 5.6.5. cbor2 before
 5.9.0 recurses without limit on deeply nested input (CVE-2026-26209), so Keyless
-must declare the floor itself and the installed cbor2 must meet it."""
+must declare the floor itself and the installed cbor2 must meet it.
+
+cbor2 6 is a rewrite with breaking changes, and py_webauthn 2.x is not built for
+it, so the declared range also stops below 6."""
 
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 CBOR2_FLOOR = Version("5.9.0")
+CBOR2_CEILING = Version("6")
 LAST_VULNERABLE = "5.8.0"
 
 
@@ -43,8 +47,19 @@ class TestDependencyFloors(FrappeTestCase):
 				self.assertNotIn(LAST_VULNERABLE, cbor2[0].specifier)
 				self.assertIn(str(CBOR2_FLOOR), cbor2[0].specifier)
 
+	def test_cbor2_ceiling_is_declared(self):
+		for path in ("pyproject.toml", "requirements.txt"):
+			with self.subTest(path=path):
+				(cbor2,) = [r for r in declared(path) if r.name.lower() == "cbor2"]
+				self.assertIn("5.99.99", cbor2.specifier)
+				for v in ("6.0.0", "6.0.0rc1", "6.1.2"):
+					self.assertFalse(cbor2.specifier.contains(v, prereleases=True), f"{path} allows cbor2 {v}")
+
 	def test_installed_cbor2_meets_the_floor(self):
 		self.assertGreaterEqual(Version(version("cbor2")), CBOR2_FLOOR)
+
+	def test_installed_cbor2_is_below_6(self):
+		self.assertLess(Version(version("cbor2")), CBOR2_CEILING)
 
 	def test_webauthn_constraint_unchanged(self):
 		# The floor is added alongside py_webauthn, not instead of it.
