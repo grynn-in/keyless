@@ -281,8 +281,8 @@ class TestMagicLinkRoundTrip(StoredEmailCase):
 
 def limit_key_for(address: str) -> str:
 	"""The key request, guess and recovery-code limits for a typed address are kept
-	under (for an address with no account)."""
-	return common.account_key(address, None)
+	under."""
+	return common.limit_key(address)
 
 
 # Characters to probe: Latin-1 Supplement, Latin Extended-A and -B, Latin Extended

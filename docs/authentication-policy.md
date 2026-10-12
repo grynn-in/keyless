@@ -164,11 +164,20 @@ Notes:
 
 ### Email sign-in codes: limits
 
-Limits count per account. The database finds an account without regard to case, accents
-or surrounding spaces, so every spelling of an address that reaches one account shares one
-count, and one code. Addresses with no account are counted the same way (case, accents and
-spaces ignored), so the limits reveal nothing. The same holds for magic links and recovery
-codes. Hitting a limit gives HTTP 429, *"Too many attempts. Try again later."*
+Limits count per address **as the database compares it**. The database finds an account
+without regard to case, accents or surrounding spaces, so several spellings can reach one
+account. Two typed addresses share a limit exactly when the database (the collation of
+`User.email`, `utf8mb4_unicode_ci` by default) treats them as equal. That rule does not
+depend on whether an account exists, so whether two spellings share a 429 says nothing
+about whether there is an account. The same holds for magic links and recovery codes.
+Hitting a limit gives HTTP 429, *"Too many attempts. Try again later."*
+
+The code or link itself belongs to the account, so a code requested with one spelling
+works with any spelling that reaches the account. An account that can be found by two
+unrelated strings (its name and a different email address, after the address was
+changed) has a separate limit for each, as two unrelated addresses would; sharing one
+would show that both strings lead to the same account. Each code still allows only
+**Max OTP Attempts** wrong guesses, whichever string is typed.
 
 Anyone who knows an address could use up a limit on it, so limits on requests and on
 recovery codes count per address **and client IP**: a stranger hitting the limit from their
@@ -533,6 +542,7 @@ From the follow-up audit of 10 October 2026:
 | The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
 | Numeric settings must be inside fixed ranges (section 3, "Allowed values for the numeric settings"); OTP Length is at least 6 and Audit Retention at least 30 days; changes to Audit Retention are logged as `audit_retention_changed` (F-9) | The migrate changes any stored value outside its range to the nearest bound, lists each change in the Error Log ("Keyless: settings out of range") and logs retention changes in the audit log. An Audit Retention of 0 or less becomes 90, not 30. Blank values get their default without an Error Log entry (the app already used the default). Check the list: a site that used 4-digit codes now sends 6-digit codes, and one that kept fewer than 30 days of audit log now keeps 30. The migrate never stops over this; if the check itself fails it undoes its changes and logs "Keyless: settings bounds patch failed". |
 | Codes and links go to the address stored on the account, not the address as typed; codes, links and limits are kept per account, so every spelling of an address shares them (F-4) | Nothing. A code requested just before the upgrade with a spelling that differs from the stored address stops working; request a new one. |
+| Codes and links go to the address stored on the account, not the address as typed. Codes and links are kept per account; limits are kept per address as the database compares it, so every spelling of an address shares them (F-4) | Nothing. A code requested just before the upgrade with a spelling that differs from the stored address stops working; request a new one. Links sent before the upgrade still work. Limit counts start again from zero once. |
 
 ### From the audit of 12 October 2026
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ipaddress
-import unicodedata
 from urllib.parse import urlsplit
 
 import frappe
@@ -112,8 +111,9 @@ def take_attempt(bucket: str, identity: str, limit: int, window: int, *, per_ip:
 
 def limit_mail_requests(email: str, settings, kind: str) -> None:
 	"""Hourly and daily limits on codes or links mailed to `email`, per address and
-	client IP, with an account-wide backstop (see take_attempt). Unknown addresses
-	are counted the same way, so the limits reveal nothing (M-1)."""
+	client IP, with an account-wide backstop (see take_attempt). `email` is a
+	limit_key, which does not depend on whether the address has an account, so
+	known and unknown addresses are limited alike (M-1, F-4)."""
 	take_attempt(f"{kind}-request-hour", email, int(settings.rate_limit_per_hour or 5), HOUR)
 	take_attempt(f"{kind}-request-day", email, int(settings.otp_daily_limit or 10), DAY)
 
@@ -127,20 +127,48 @@ def pretend_success_if_unknown(email: str) -> str | None:
 	return resolve_enabled_user(email)
 
 
-def account_key(email: str, user: str | None) -> str:
-	"""What codes, links and limits for a typed address are kept under (audit F-4).
+# Collation of tabUser.email per site, read once per worker.
+_USER_EMAIL_COLLATION: dict[str, str] = {}
 
-	The database finds an account without regard to case or accents, so several
-	spellings reach one account. For an address with an account this is the account
-	(the User name), so every spelling shares one code and one budget. For an
-	address with none it is the address folded the same way (accents removed, case
-	folded), so spellings share a budget there too and the limits do not show
-	whether an account exists.
+
+def _user_email_collation() -> str:
+	site = frappe.local.site
+	if site not in _USER_EMAIL_COLLATION:
+		rows = frappe.db.sql(
+			"""select COLLATION_NAME from information_schema.COLUMNS
+			where TABLE_SCHEMA = database() and TABLE_NAME = 'tabUser' and COLUMN_NAME = 'email'"""
+		)
+		name = rows[0][0] if rows else None
+		if not name or not name.replace("_", "").isalnum():
+			raise RuntimeError(f"Keyless: cannot read the collation of tabUser.email (got {name!r})")
+		_USER_EMAIL_COLLATION[site] = name
+	return _USER_EMAIL_COLLATION[site]
+
+
+def limit_key(email: str) -> str:
+	"""What the request, wrong-guess and recovery-code limits for a typed address are
+	kept under (audit F-4).
+
+	The database finds an account without regard to case and accents, so several
+	spellings reach one account. The key is the address as the database compares it:
+	its weight string in the collation of User.email. Two typed addresses therefore
+	share a limit exactly when the database treats them as the same address, whether
+	or not an account exists, so a shared 429 does not show that one does. An account
+	found by two unrelated strings (its name and a different email) has one budget for
+	each, as two unrelated addresses would. Codes and links are kept under the
+	account itself (the User name), not under this key.
+
+	Other databases: the lower-cased address, which is how Frappe compares it there.
 	"""
-	if user:
-		return user
-	decomposed = unicodedata.normalize("NFKD", normalize_email(email))
-	return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+	email = normalize_email(email)
+	if frappe.db.db_type != "mariadb":
+		return email
+	collation = _user_email_collation()
+	rows = frappe.db.sql(
+		f"select hex(weight_string(convert(%s using utf8mb4) collate {collation}))",
+		(email,),
+	)
+	return rows[0][0] or ""
 
 
 def stored_email(user: str) -> str | None:

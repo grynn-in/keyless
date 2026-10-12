@@ -10,8 +10,8 @@ from frappe.utils import cint
 from keyless import notify, stepup
 from keyless.api.common import (
 	HOUR,
-	account_key,
 	get_ip_rate_limit,
+	limit_key,
 	normalize_email,
 	require_enabled,
 	take_attempt,
@@ -88,9 +88,10 @@ def redeem(email: str, code: str):
 		frappe.throw(_("Backup codes are disabled"))
 
 	email = normalize_email(email)
+	# Per address as the database compares it, so every spelling of one address
+	# shares the limit (F-4).
+	give_back = take_attempt("backup-guess-hour", limit_key(email), BACKUP_FAILURES_PER_HOUR, HOUR)
 	user = resolve_enabled_user(email)
-	# Per account, whichever spelling of its address is typed (F-4).
-	give_back = take_attempt("backup-guess-hour", account_key(email, user), BACKUP_FAILURES_PER_HOUR, HOUR)
 	# Same work whether the account exists, has codes left, or not: one query and
 	# exactly CODES_PER_USER hash checks, with no early exit (audit M-2).
 	rows = frappe.get_all(
