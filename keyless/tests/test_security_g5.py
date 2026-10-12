@@ -14,7 +14,7 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import set_request
 
 from keyless.api import backup, magic_link, otp
-from keyless.api.common import ACCOUNT_BACKSTOP_FACTOR
+from keyless.api.common import ACCOUNT_BACKSTOP_FACTOR, client_network
 from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
 
 USER = "kl-g5-user@example.com"
@@ -134,3 +134,68 @@ class TestIPv6Prefix(FrappeTestCase):
 			from_ip("keyless.api.otp.verify_otp", "198.51.100.9", email=USER)
 			with self.assertRaises(frappe.RateLimitExceededError):
 				otp.verify_otp(USER, "000000")
+
+
+class TestClientNetwork(FrappeTestCase):
+	"""client_network() on its own: the key each kind of client address gets."""
+
+	def setUp(self):
+		previous = getattr(frappe.local, "request_ip", None)
+		self.addCleanup(setattr, frappe.local, "request_ip", previous)
+
+	def test_ipv4_is_kept_as_is(self):
+		self.assertEqual(client_network("198.51.100.7"), "198.51.100.7")
+		self.assertEqual(client_network(" 198.51.100.7 "), "198.51.100.7")
+
+	def test_ipv6_counts_as_its_64(self):
+		self.assertEqual(client_network("2001:db8:1:2:3:4:5:6"), "2001:db8:1:2::/64")
+		self.assertEqual(client_network("2001:db8:1:2::1"), "2001:db8:1:2::/64")
+		# The next /64 in the same /56 or /48 is a different client.
+		self.assertEqual(client_network("2001:db8:1:3::1"), "2001:db8:1:3::/64")
+
+	def test_ipv6_spellings_give_one_key(self):
+		expected = "2001:db8:1:2::/64"
+		for spelling in (
+			"2001:DB8:1:2::ABCD",
+			"2001:0db8:0001:0002:0000:0000:0000:0001",
+			"2001:0DB8:0001:0002:FFFF:FFFF:FFFF:FFFF",
+			"2001:db8:1:2:0:0:0:9",
+		):
+			with self.subTest(spelling=spelling):
+				self.assertEqual(client_network(spelling), expected)
+
+	def test_ipv4_mapped_ipv6_counts_as_the_ipv4_address(self):
+		for spelling in ("::ffff:198.51.100.7", "::FFFF:198.51.100.7", "::ffff:c633:6407"):
+			with self.subTest(spelling=spelling):
+				self.assertEqual(client_network(spelling), "198.51.100.7")
+		# Two mapped addresses are two clients, not one ::/64.
+		self.assertNotEqual(client_network("::ffff:198.51.100.7"), client_network("::ffff:198.51.100.8"))
+
+	def test_zone_id_is_dropped(self):
+		# A scoped (link-local) address counts as its /64, whatever the zone.
+		self.assertEqual(client_network("fe80::1%eth0"), "fe80::/64")
+		self.assertEqual(client_network("fe80::2%25"), "fe80::/64")
+
+	def test_value_that_is_not_an_ip_is_used_as_is(self):
+		for value in ("not-an-ip", "198.51.100.300", "01.2.3.4", "2001:db8::1::2", "1.2.3.4%x", "unknown"):
+			with self.subTest(value=value):
+				self.assertEqual(client_network(value), value)
+
+	def test_empty_and_missing(self):
+		self.assertEqual(client_network(""), "")
+		frappe.local.request_ip = None
+		self.assertEqual(client_network(), "")
+		self.assertEqual(client_network(None), "")
+
+	def test_defaults_to_the_request_ip(self):
+		frappe.local.request_ip = "2001:db8:1:2::42"
+		self.assertEqual(client_network(), "2001:db8:1:2::/64")
+		frappe.local.request_ip = "198.51.100.7"
+		self.assertEqual(client_network(), "198.51.100.7")
+
+	def test_transition_forms_are_not_unwrapped(self):
+		# 6to4 (2002::/16), Teredo (2001::/32) and IPv4-compatible (::a.b.c.d) addresses
+		# are counted by their /64 like any other IPv6 address; the docs say so.
+		self.assertEqual(client_network("2002:c633:6407::1"), "2002:c633:6407::/64")
+		self.assertEqual(client_network("2001:0:4136:e378:8000:63bf:3fff:fdd2"), "2001:0:4136:e378::/64")
+		self.assertEqual(client_network("::198.51.100.7"), "::/64")
