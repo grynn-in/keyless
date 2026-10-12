@@ -63,6 +63,11 @@ class StoredEmailCase(FrappeTestCase):
 	def setUp(self):
 		reset_rate_limits()
 		self.addCleanup(reset_rate_limits)
+		# On Frappe 15, frappe.cache.get_value keeps what it read (even "no code") in
+		# frappe.local.cache, which lives for the whole test run here; clear it so a
+		# code stored in Redis by this test is seen.
+		if isinstance(getattr(frappe.local, "cache", None), dict):
+			frappe.local.cache.clear()
 		self.assertEqual(
 			frappe.db.get_value("User", {"name": VARIANT.lower()}, "name"),
 			USER,
