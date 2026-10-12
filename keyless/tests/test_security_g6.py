@@ -3,8 +3,8 @@ passkey sign-in and registration, and only asks for cbor2 >= 5.6.5. cbor2 before
 5.9.0 recurses without limit on deeply nested input (CVE-2026-26209), so Keyless
 must declare the floor itself and the installed cbor2 must meet it.
 
-cbor2 6 is a rewrite with breaking changes, and py_webauthn 2.x is not built for
-it, so the declared range also stops below 6."""
+cbor2 6 is a rewrite with breaking changes. py_webauthn 2.x was built on cbor2 5
+but does not cap it, so Keyless's declared range stops below 6."""
 
 from __future__ import annotations
 
