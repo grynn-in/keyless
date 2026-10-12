@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import unicodedata
 from urllib.parse import urlsplit
 
 import frappe
@@ -124,6 +125,27 @@ def normalize_email(email: str) -> str:
 def pretend_success_if_unknown(email: str) -> str | None:
 	"""Resolve an enabled user, or return None without leaking existence."""
 	return resolve_enabled_user(email)
+
+
+def account_key(email: str, user: str | None) -> str:
+	"""What codes, links and limits for a typed address are kept under (audit F-4).
+
+	The database finds an account without regard to case or accents, so several
+	spellings reach one account. For an address with an account this is the account
+	(the User name), so every spelling shares one code and one budget. For an
+	address with none it is the address folded the same way (accents removed, case
+	folded), so spellings share a budget there too and the limits do not show
+	whether an account exists.
+	"""
+	if user:
+		return user
+	decomposed = unicodedata.normalize("NFKD", normalize_email(email))
+	return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def stored_email(user: str) -> str | None:
+	"""The address on the account, which is where its codes and links are sent."""
+	return frappe.db.get_value("User", user, "email")
 
 
 def site_origin() -> str:

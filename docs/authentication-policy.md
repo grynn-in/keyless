@@ -164,9 +164,11 @@ Notes:
 
 ### Email sign-in codes: limits
 
-Limits count per account (the email address, ignoring case and spaces). Addresses with no
-account are counted the same way, so the limits reveal nothing. Hitting a limit gives
-HTTP 429, *"Too many attempts. Try again later."*
+Limits count per account. The database finds an account without regard to case, accents
+or surrounding spaces, so every spelling of an address that reaches one account shares one
+count, and one code. Addresses with no account are counted the same way (case, accents and
+spaces ignored), so the limits reveal nothing. The same holds for magic links and recovery
+codes. Hitting a limit gives HTTP 429, *"Too many attempts. Try again later."*
 
 Anyone who knows an address could use up a limit on it, so limits on requests and on
 recovery codes count per address **and client IP**: a stranger hitting the limit from their
@@ -239,6 +241,7 @@ cannot shorten retention below 30 days; 0 or less counts as 90.
 |---|---|
 | The address has an account, has none, or the mail server fails | The same response: *"ok"*, in the same time. The code or link is created and mailed after the response has gone, and sent at once rather than left for the next run of the email queue, so it does not depend on the scheduler. A sending failure is only written to the Error Log; check it, and the Email Queue, if people report missing codes. |
 | **Hide User Enumeration** is off | Unknown addresses get *"No active user found"*, as before. |
+| The typed address differs from the one on the account (for example in case or accents) | The code or link goes to the address stored on the account, never to the address as typed. A code works with any spelling that reaches the account. |
 
 ### Magic links: confirm before signing in, in the same browser
 
@@ -529,6 +532,7 @@ From the follow-up audit of 10 October 2026:
 | Passkey add and remove entries are logged by the record, with `by <user>` when someone else acted | Update any alert that matched the old empty `detail`. |
 | The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
 | Numeric settings must be inside fixed ranges (section 3, "Allowed values for the numeric settings"); OTP Length is at least 6 and Audit Retention at least 30 days; changes to Audit Retention are logged as `audit_retention_changed` (F-9) | The migrate changes any stored value outside its range to the nearest bound, lists each change in the Error Log ("Keyless: settings out of range") and logs retention changes in the audit log. An Audit Retention of 0 or less becomes 90, not 30. Blank values get their default without an Error Log entry (the app already used the default). Check the list: a site that used 4-digit codes now sends 6-digit codes, and one that kept fewer than 30 days of audit log now keeps 30. The migrate never stops over this; if the check itself fails it undoes its changes and logs "Keyless: settings bounds patch failed". |
+| Codes and links go to the address stored on the account, not the address as typed; codes, links and limits are kept per account, so every spelling of an address shares them (F-4) | Nothing. A code requested just before the upgrade with a spelling that differs from the stored address stops working; request a new one. |
 
 ### From the audit of 12 October 2026
 

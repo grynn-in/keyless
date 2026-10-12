@@ -152,7 +152,7 @@ def hit_count(bucket: str, identity: str) -> int:
 def store_magic_key(
 	key: str, email: str, expires_in_sec: int, redirect_to: str | None = None, browser: str | None = None
 ) -> None:
-	# Key is unguessable; value is the bound email and post-login target, kept
+	# Key is unguessable; value is the bound account and post-login target, kept
 	# server-side so the emailed URL cannot be edited to point elsewhere, and the
 	# digest of the requesting browser's ID (see keyless.api.magic_link).
 	cache_set(
