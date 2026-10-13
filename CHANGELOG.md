@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.1 (unreleased)
+## 2.0.1 (13 October 2026)
 
 Security release. It fixes the follow-up audits of 10 October 2026 (F-1 to F-4, F-9) and
 12 October 2026 (G-1 to G-6, G-8). **Read
