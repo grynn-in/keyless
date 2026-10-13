@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from urllib.parse import urlsplit
 
 import frappe
@@ -46,10 +47,37 @@ def too_many():
 
 
 # Limits that anyone who knows an address could use up are kept per address and
-# client IP, so a stranger cannot lock the owner out from one machine. The same
+# client network (see client_network), so a stranger cannot lock the owner out from
+# one machine. The same
 # address may make this many times the limit in total, from all IPs, before it is
 # refused everywhere; that backstop is what bounds an attacker with many IPs.
 ACCOUNT_BACKSTOP_FACTOR = 10
+
+
+# One IPv6 host is normally given a whole /64 and can send each request from a new
+# address in it, so per-IP limits count the /64 as one client (audit 2026-10-12, G-5).
+IPV6_CLIENT_PREFIX = 64
+
+
+def client_network(ip: str | None = None) -> str:
+	"""The client key for per-IP limits: an IPv4 address as is, an IPv6 address's /64.
+
+	`ip` defaults to Frappe's resolved client IP. An IPv4 address written as IPv6
+	(::ffff:a.b.c.d) counts as that IPv4 address. A value that is not an IP address
+	is used as it is, so it still gets a bucket of its own. 6to4, Teredo and
+	IPv4-compatible addresses are not unwrapped; they count by their /64 too.
+	"""
+	if ip is None:
+		ip = getattr(frappe.local, "request_ip", None) or ""
+	try:
+		address = ipaddress.ip_address(ip.strip())
+	except ValueError:
+		return ip
+	if address.version == 6:
+		if address.ipv4_mapped:
+			return str(address.ipv4_mapped)
+		return str(ipaddress.ip_network(f"{address}/{IPV6_CLIENT_PREFIX}", strict=False))
+	return str(address)
 
 
 def take_attempt(bucket: str, identity: str, limit: int, window: int, *, per_ip: bool = True):
@@ -65,7 +93,7 @@ def take_attempt(bucket: str, identity: str, limit: int, window: int, *, per_ip:
 
 	counted = []
 	if per_ip:
-		scoped = f"{identity}\n{getattr(frappe.local, 'request_ip', None) or ''}"
+		scoped = f"{identity}\n{client_network()}"
 		counted.append((f"{bucket}-ip", scoped))
 		if count_hit(f"{bucket}-ip", scoped, window) > limit:
 			too_many()
