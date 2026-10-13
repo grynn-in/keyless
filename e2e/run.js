@@ -157,6 +157,33 @@ async function openKeylessMenu(page, user, item) {
 		if ((await whoAmI(page)) !== SYS) throw new Error("passkey sign-in did not sign in");
 	});
 
+	// --- G-2: a dot-segment redirect-to must not leave the site after sign-in ---
+	// "/.//evil.example" keeps the site origin when parsed, but its path is "//evil.example".
+	// Requests to that host are answered locally, so a failure shows up as a URL check,
+	// not as a network error.
+	await page.context().route(/^https?:\/\/evil\.example\//, (r) => r.fulfill({ status: 200, body: "left the site" }));
+	// Dropping the cookies signs the browser out even if the page is no longer on the site.
+	const logout = () => page.context().clearCookies();
+
+	await step("passkey sign-in with a dot-segment redirect-to stays on the site", page, async () => {
+		await logout();
+		await page.goto("/keyless/login?redirect-to=" + encodeURIComponent("/.//evil.example/x"));
+		if ((await whoAmI(page)) !== "Guest") throw new Error("still signed in");
+		await page.click("#keyless-passkey");
+		await page.waitForURL((u) => !u.pathname.startsWith("/keyless/login"), { timeout: 15000 });
+		const landed = new URL(page.url());
+		if (landed.host !== new URL(BASE).host) throw new Error(`redirected off the site to ${page.url()}`);
+		if ((await whoAmI(page)) !== SYS) throw new Error("passkey sign-in did not sign in");
+	});
+
+	await step("passkey sign-in still follows a same-site redirect-to", page, async () => {
+		await logout();
+		await page.goto("/keyless/login?redirect-to=" + encodeURIComponent("/app/todo"));
+		await page.click("#keyless-passkey");
+		await page.waitForURL(/\/(app|desk)\/todo/, { timeout: 15000 });
+		if ((await whoAmI(page)) !== SYS) throw new Error("passkey sign-in did not sign in");
+	});
+
 	// --- System user without a passkey: step-up falls back to an emailed code ---
 	const page2 = await newPage(browser);
 	await step("step-up by emailed code when the user has no passkey", page2, async () => {

@@ -11,6 +11,8 @@ What it checks:
 - registering a passkey from Desk (a fresh sign-in counts as step-up);
 - step-up by passkey after the window expires, then backup codes are shown;
 - passkey sign-in;
+- a `redirect-to` such as `/.//evil.example` does not send the browser off the site, and a
+  same-site `redirect-to` is still followed;
 - step-up by emailed code for a user with no passkey, and cancelling it;
 - a magic link shows a confirmation page, signs in only on the button, and is then used up;
 - a `redirect-to` XSS payload stays inert text.

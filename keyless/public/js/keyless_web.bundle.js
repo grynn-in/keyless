@@ -130,7 +130,12 @@ import { startAuthentication } from "./webauthn_client.js";
 		return data.message;
 	}
 
-	/** Same-origin path from ?redirect-to=, else null (Frappe's sanitise_redirect). */
+	/**
+	 * Same-origin path from ?redirect-to=, else null (Frappe's sanitise_redirect).
+	 *
+	 * URL parsing collapses dot segments, so "/.//evil.com" keeps this origin but has
+	 * the pathname "//evil.com", which a browser reads as another host (audit G-2).
+	 */
 	function redirectTo() {
 		const raw =
 			new URLSearchParams(window.location.search).get("redirect-to") ||
@@ -140,6 +145,7 @@ import { startAuthentication } from "./webauthn_client.js";
 		try {
 			const url = new URL(raw, window.location.origin);
 			if (url.origin !== window.location.origin) return null;
+			if (url.pathname.startsWith("//")) return null;
 			return url.pathname + url.search + url.hash;
 		} catch (e) {
 			return null;
@@ -147,7 +153,11 @@ import { startAuthentication } from "./webauthn_client.js";
 	}
 
 	function goHome(result) {
-		window.location.href = redirectTo() || (result && result.home) || "/app";
+		const target = redirectTo();
+		// Navigate to the absolute URL, so the browser cannot read the target as another host.
+		window.location.href = target
+			? new URL(target, window.location.origin).href
+			: (result && result.home) || "/app";
 	}
 
 	function emailValue(input) {

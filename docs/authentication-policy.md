@@ -353,6 +353,7 @@ person to a page after sign-in.
 |---|---|
 | A path on this site starting with a single `/`, e.g. `/app/todo?x=1` | Used as given. |
 | Another site (`https://evil.com`, `//evil.com`), a backslash form (`/\evil.com`), a scheme (`javascript:`), a bare name (`app/todo`) or anything with control characters | Ignored. The person lands on the default page: Desk for System Users, the website home page for Website Users. |
+| A path whose `.` or `..` segments or encoded slashes resolve to another site, e.g. `/.//evil.com`, `/a/..//evil.com`, `/%2e//evil.com`, `/%2F%2Fevil.com` | Ignored, as above. Browsers collapse these segments, so the path would otherwise be read as `//evil.com`. The login page script applies the same check to `redirect-to` and navigates to the full same-site URL. |
 
 Magic links:
 
@@ -449,6 +450,7 @@ From the follow-up audit of 10 October 2026:
 | The magic-link browser cookie now lasts exactly **Magic Link Expiry** in every site time zone (G-3). Before, its expiry was the site's local time read as UTC: on sites west of UTC the cookie had already expired, so every magic link was refused as "another browser"; east of UTC it outlived the link by the UTC offset | Nothing. On sites west of UTC, tell users magic links work again. |
 | Removing a passkey through `keyless.api.passkey.revoke_passkey` needs a recent sign-in or confirmation, like adding one (G-4) | Nothing for Keyless's own screens. A custom screen or script that calls `revoke_passkey` must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. Deleting a User Passkey from Desk or REST as a System Manager is unchanged. |
 | Removing your own passkey needs a recent sign-in or confirmation, like adding one, whether through `keyless.api.passkey.revoke_passkey` or by deleting the User Passkey record (Desk, list-view bulk Delete, `/api/resource`, `frappe.client.delete`). A System Manager using `revoke_passkey` for someone else's passkey needs it too (G-4) | Nothing for Keyless's own screens. A custom screen or script run from a user's session that removes passkeys must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. A System Manager deleting someone else's User Passkey record from Desk or REST, and server code with no session (`bench console`, patches), are unchanged. |
+| Login-page and magic-link targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
 
 ---
 
