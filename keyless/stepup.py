@@ -1,8 +1,9 @@
 """Recent re-authentication ("step-up") before sensitive account changes (audit M-3, D7).
 
 Signing in marks the session; so does confirming with an existing passkey or a
-fresh email code (keyless.api.stepup). Adding a passkey or regenerating backup
-codes requires a mark younger than Keyless Settings' Step-up Window.
+fresh email code (keyless.api.stepup). Adding or removing a passkey and
+regenerating backup codes require a mark younger than Keyless Settings' Step-up
+Window.
 """
 
 from __future__ import annotations

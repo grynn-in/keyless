@@ -137,8 +137,11 @@ class TestUserPasskeyPermissions(FrappeTestCase):
 		self.assertEqual(frappe.db.get_value("User Passkey", repointed.name, "user"), "Administrator")
 
 	def test_owner_can_still_revoke_own_passkey_via_keyless_api(self):
+		from keyless import stepup
+
 		doc = self._make_passkey()
 		frappe.set_user(LOW_USER)
+		stepup.mark()  # removing a passkey needs a recent sign-in (G-4)
 		try:
 			passkey.revoke_passkey(doc.name)
 		finally:
