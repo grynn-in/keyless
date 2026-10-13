@@ -5,13 +5,15 @@ import secrets
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
+from frappe.utils import cint
 
 from keyless import notify, stepup
 from keyless.api.common import HOUR, get_ip_rate_limit, normalize_email, require_enabled, take_attempt
 from keyless.audit import log_event
 from keyless.auth import issue_session
+from keyless.keyless.doctype.keyless_backup_code.keyless_backup_code import GENERATED_FLAG, HASH_VERSION
 from keyless.tokens import compare, digest
-from keyless.user import resolve_enabled_user
+from keyless.user import ensure_user_handle, resolve_enabled_user
 
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODES_PER_USER = 10
@@ -26,6 +28,17 @@ def _generate_code() -> str:
 	return "".join(ALPHABET[secrets.randbelow(len(ALPHABET))] for _ in range(10))
 
 
+def _bound(handle: str, code: str) -> str:
+	"""What a version-2 row's hash covers: the code and the user's WebAuthn handle,
+	which is random per user and survives renaming the user (audit G-1)."""
+	return f"keyless-backup-code:{handle}:{code}"
+
+
+def code_digest(user: str, code: str) -> str:
+	"""Stored hash of `code` for `user`, as generate_codes writes it."""
+	return digest(_bound(ensure_user_handle(user), code))
+
+
 @frappe.whitelist()
 def generate_codes():
 	"""Rotate backup codes for the current user. Returns plaintext once."""
@@ -37,18 +50,22 @@ def generate_codes():
 	stepup.require()
 
 	user = frappe.session.user
+	handle = ensure_user_handle(user)
 	frappe.db.delete("Keyless Backup Code", {"user": user})
 	plain = []
 	for _i in range(CODES_PER_USER):
 		code = _generate_code()
 		plain.append(code)
-		frappe.get_doc(
+		doc = frappe.get_doc(
 			{
 				"doctype": "Keyless Backup Code",
 				"user": user,
-				"code_hash": digest(code),
+				"code_hash": digest(_bound(handle, code)),
+				"hash_version": HASH_VERSION,
 			}
-		).insert(ignore_permissions=True)
+		)
+		doc.flags[GENERATED_FLAG] = user
+		doc.insert(ignore_permissions=True)
 	log_event("backup_codes_generated", user=user, method="backup", success=True)
 	notify.sign_in_methods_changed(
 		user, _("New backup codes were generated for your account. The old codes no longer work.")
@@ -71,15 +88,30 @@ def redeem(email: str, code: str):
 	rows = frappe.get_all(
 		"Keyless Backup Code",
 		filters={"user": user or "", "used": 0},
-		fields=["name", "code_hash"],
+		fields=["name", "code_hash", "hash_version", "owner", "modified_by"],
 		limit=CODES_PER_USER,
 	)
-	hashes = [row.code_hash for row in rows] + [_DUMMY_HASH] * (CODES_PER_USER - len(rows))
+	handle = frappe.db.get_value("User", {"name": user or ""}, "keyless_user_handle") or ""
 	normalized = (code or "").strip().upper()
+	bound = _bound(handle, normalized)
 	match = None
-	for i, expected in enumerate(hashes):
-		if compare(normalized, expected) and i < len(rows) and match is None:
-			match = rows[i]
+	for i in range(CODES_PER_USER):
+		row = rows[i] if i < len(rows) else None
+		if row is None:
+			compare(bound, _DUMMY_HASH)
+			continue
+		# A version-1 hash covers the code only. Such a row counts only while
+		# its creator and its last editor are its user, as generate_codes left
+		# it: unused rows are never saved again (the controller refuses it), so
+		# a row a System Manager created for another user, or moved with
+		# set_value or PUT (even setting `owner` too), does not count. Renaming
+		# a user rewrites `owner` and `modified_by`, so renames keep working.
+		if cint(row.hash_version) >= HASH_VERSION:
+			ok = compare(bound, row.code_hash)
+		else:
+			ok = compare(normalized, row.code_hash) and row.owner == user and row.modified_by == user
+		if ok and match is None:
+			match = row
 	if not match:
 		log_event("backup_failed", user=user or "Guest", method="backup", success=False)
 		frappe.throw(_("Invalid recovery code"), frappe.AuthenticationError)

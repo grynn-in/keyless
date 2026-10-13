@@ -250,6 +250,27 @@ on another device should use an email code, which works anywhere.
 
 ---
 
+### Backup codes: who can create, change and use them
+
+A backup code signs its user in and is allowed where passkeys or Frappe 2FA are otherwise
+required (section 3), so a code must only ever work for the user who generated it
+(audit of 12 October 2026, G-1).
+
+| If… | Then… |
+|---|---|
+| A user generates new backup codes (Desk, Keyless menu) | Works as before, after step-up. Their old codes stop working. |
+| Anyone, including a System Manager or Administrator, creates a Keyless Backup Code from Desk, `/api/resource`, Data Import or a script | Refused. System Managers have read and delete permission only, and the controller refuses any row that does not come from the user's own **New Backup Codes**. |
+| Someone other than Administrator ends up creating a code for Administrator | Refused, whatever the path. |
+| Anyone, including server code or a role given write with Role Permission Manager, saves an existing code (to change its user, hash, hash version, creator, or used flag or date) | Refused (*"Backup codes cannot be changed"*). Redeeming marks a code used without saving the record. |
+| A code's record is pointed at another user in the database | The code no longer works for anyone: the stored hash covers the code and the user's WebAuthn handle, so it only matches for the user it was generated for. |
+| A System Manager deletes codes from Desk or REST | Allowed. Each code is logged as `backup_code_deleted` (with `by <System Manager>`). The user gets one email per request, even when the list view deletes several codes at once. |
+| A code generated **before** this fix is redeemed | It still works for its own user: no one has to generate new codes. Such a code works only while the record's creator and last editor are its user. That is always true for an unused code made with **New Backup Codes**, because its record is never saved again. Renaming a user keeps their codes working. |
+| A code generated before this fix was created by someone else for this user, or moved to them (even if the creator was changed in the same request) | It no longer works. The migrate lists these records (see "Checking existing data after upgrading"). |
+
+The WebAuthn handle is the random per-user value Keyless already uses for passkeys. It does
+not change when a user is renamed. A System Manager who edits a user's **WebAuthn User
+Handle** stops that user's passkeys and their new backup codes from working.
+
 ## 4. Passkeys (User Passkey records)
 
 ### Who can change passkey records
@@ -315,6 +336,7 @@ until they expire or the user signs out of them.
 |---|---|
 | A passkey is added or removed, or new backup codes are generated | An email goes to the account owner saying what changed and listing the passkeys now on the account, with a prompt to act if it was not them. It is queued, so a mail failure does not block the change. |
 | A System Manager deletes a passkey from Desk or REST | The same email (before F-2 nothing was sent), and a `passkey_revoked` entry naming who did it. |
+| A System Manager deletes backup codes from Desk or REST | One email to the user per request (before G-1 nothing was sent), and a `backup_code_deleted` entry per code naming who did it. |
 | A System Manager turns Passwordless Only on or off | An email to the user saying so. |
 
 ### Which websites a passkey works from
@@ -365,6 +387,19 @@ It reads the User records' version history (changes saved by the user themselves
 off) and writes its findings to the **Error Log** ("Keyless: review Passwordless Only changes").
 It runs once automatically during the migrate that brings F-3, and only reports. Changes made
 with `frappe.db.set_value` leave no history and are not found.
+
+Before G-1, a System Manager could create a backup code for another user, or move one of
+their own codes to another user, and sign in as that user. To find such codes:
+
+```bash
+bench --site <site> execute keyless.security.report_unbound_backup_codes
+```
+
+It lists codes stored before G-1 that their user did not generate: those whose creator is
+not their user (used or not), and unused ones last saved by someone else. It writes its findings to the **Error Log** ("Keyless: review Keyless Backup Code ownership"). These
+codes no longer sign anyone in. A used one may show past misuse: check the Keyless Audit Log
+for `login` entries with method `backup_code` for that user. The report runs once during the
+migrate that brings G-1, and only reports.
 
 ---
 
@@ -434,6 +469,7 @@ New or changed events in **Keyless Audit Log**:
 |---|---|---|
 | `passwordless_only_changed` | Passwordless Only was turned on or off on a User record, or turning it off was refused (F-3) | `detail` is `on`, `off` or `off refused`, followed by `by <user>` when someone other than the account owner did it. |
 | `passkey_registered` / `passkey_revoked` | A passkey was added or removed | Now logged by the User Passkey record itself, so every path is covered (F-2). `detail` is the passkey's ID, followed by `by <user>` when someone other than the owner did it. |
+| `backup_code_deleted` | A backup code was deleted from Desk, REST or a script (G-1) | `detail` is the code record's ID, followed by `by <user>` when someone other than the owner did it. Generating new codes replaces the old ones without this entry; `backup_codes_generated` covers that. |
 | `password_blocked` | A password login or OAuth password grant was blocked | `method` is `password` or `oauth_password`. For an unknown login name, `user` is `Guest` and the typed name is in `detail`. |
 | `factor_blocked` | Email OTP or magic link refused | `detail` is `passkey_required` (System User rule) or `frappe_2fa` (Frappe 2FA applies). |
 | `passkey_failed` | Passkey sign-in refused | New `detail` values: `user_handle_mismatch`, `user_disabled`, and the verification library's message. |
@@ -492,12 +528,11 @@ From the follow-up audit of 10 October 2026:
 | Removing a passkey through `keyless.api.passkey.revoke_passkey` needs a recent sign-in or confirmation, like adding one (G-4) | Nothing for Keyless's own screens. A custom screen or script that calls `revoke_passkey` must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. Deleting a User Passkey from Desk or REST as a System Manager is unchanged. |
 | Removing your own passkey needs a recent sign-in or confirmation, like adding one, whether through `keyless.api.passkey.revoke_passkey` or by deleting the User Passkey record (Desk, list-view bulk Delete, `/api/resource`, `frappe.client.delete`). A System Manager using `revoke_passkey` for someone else's passkey needs it too (G-4) | Nothing for Keyless's own screens. A custom screen or script run from a user's session that removes passkeys must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. A System Manager deleting someone else's User Passkey record from Desk or REST, and server code with no session (`bench console`, patches), are unchanged. |
 | Login-page and magic-link targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
-
-### From the audit of 12 October 2026
-
-| Change | What to do |
-|---|---|
 | System Managers can no longer delete Keyless Audit Log entries through the document, and nobody can edit them (G-8) | Nothing for normal use. To remove entries, sign in as Administrator. Changes to **Audit Retention (days)** are audited, and its minimum is 30 days. |
+| System Managers can no longer create or edit Keyless Backup Code records; codes only come from the user's own **New Backup Codes**, and no one can save an existing code (G-1) | Nothing, unless an integration created or edited codes directly. If you gave other roles create or write on the doctype with Role Permission Manager, remove it; the controller refuses those changes anyway. |
+| New codes are stored with a hash bound to the user (`hash_version` 2) | Nothing. Existing codes keep working for their own user; users do not need to generate new ones. |
+| Codes stored before G-1 that their user did not generate stop working: the creator, or for an unused code the last editor, is someone else | Check the Error Log for "Keyless: review Keyless Backup Code ownership" after the migrate. Users listed there can generate new codes. |
+| Deleting backup codes from Desk or REST is logged per code and emails the user once per request | Nothing; keep the scheduler running so the queued mail goes out. |
 
 ---
 

@@ -9,8 +9,13 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from keyless.api import backup
-from keyless.tests.security_utils import delete_user, keyless_settings, make_user, reset_rate_limits
-from keyless.tokens import digest
+from keyless.tests.security_utils import (
+	delete_user,
+	insert_backup_code,
+	keyless_settings,
+	make_user,
+	reset_rate_limits,
+)
 
 USER = "kl-l1-user@example.com"
 CODE = "ABCDEFGH23"
@@ -32,9 +37,7 @@ class TestBackupCodeRace(FrappeTestCase):
 	def setUp(self):
 		reset_rate_limits()
 		frappe.db.delete("Keyless Backup Code", {"user": USER})
-		frappe.get_doc({"doctype": "Keyless Backup Code", "user": USER, "code_hash": digest(CODE)}).insert(
-			ignore_permissions=True
-		)
+		insert_backup_code(USER, CODE)
 		frappe.db.commit()
 
 	def test_parallel_redemptions_give_one_session(self):
