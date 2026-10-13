@@ -1,4 +1,4 @@
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 try:
 	from keyless.compat import backport_before_login
