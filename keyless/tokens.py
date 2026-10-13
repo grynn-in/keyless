@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import pickle
 import secrets
 from typing import Any
 
 import frappe
+import redis
 from frappe import _
 from frappe.utils import cint, now_datetime
 from frappe.utils.password import get_encryption_key
@@ -66,7 +68,14 @@ def cache_set(prefix: str, key: str, payload: dict[str, Any], expires_in_sec: in
 
 
 def cache_get(prefix: str, key: str) -> dict[str, Any] | None:
-	value = frappe.cache.get_value(f"{prefix}{key}")
+	# Read Redis itself, never the copy Frappe keeps for the request: set_value
+	# stores one on Frappe 16 whatever get_value is asked, so a value could
+	# outlive its TTL or a delete done outside delete_value.
+	try:
+		raw = frappe.cache.get(_raw_key(f"{prefix}{key}"))
+	except redis.exceptions.ConnectionError:
+		return None
+	value = pickle.loads(raw) if raw else None
 	return value if isinstance(value, dict) else None
 
 

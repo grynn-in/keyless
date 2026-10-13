@@ -271,6 +271,14 @@ link a browser asked for keeps working). A digest of the ID is stored with the l
 request gets the cookie, whether or not the address has an account. People who read mail
 on another device should use an email code, which works anywhere.
 
+**Sites on a shared hostname (G-9).** Browsers treat every `*.frappe.cloud` site as the same
+site, because `frappe.cloud` is not on the Public Suffix List. Another tenant's site can set
+the `keyless_link_browser` cookie for `.frappe.cloud`, and its form posts to your site carry
+your Lax cookies. On such a hostname, the browser binding protects a magic link less well
+against a page that signs visitors into an attacker's account. Frappe's own `sid` cookie has
+the same exposure. Sites served on their own domain are not affected. If you rely on magic
+links, give the site a custom domain.
+
 ---
 
 ### Backup codes: who can create, change and use them
