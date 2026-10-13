@@ -544,7 +544,6 @@ From the follow-up audit of 10 October 2026:
 | New codes are stored with a hash bound to the user (`hash_version` 2) | Nothing. Existing codes keep working for their own user; users do not need to generate new ones. |
 | Codes stored before G-1 that their user did not generate stop working: the creator, or for an unused code the last editor, is someone else | Check the Error Log for "Keyless: review Keyless Backup Code ownership" after the migrate. Users listed there can generate new codes. |
 | Deleting backup codes from Desk or REST is logged per code and emails the user once per request | Nothing; keep the scheduler running so the queued mail goes out. |
-| Limits counted per address and client IP count an IPv6 client by its /64 network (G-5, audit of 12 October 2026) | Nothing for most sites. People who share one IPv6 /64 and the same email address now share its per-IP limit, as people behind one IPv4 address already did. |
 | Limits counted per address and client IP count an IPv6 client by its /64 network (G-5) | Nothing for most sites. People who share one IPv6 /64 and the same email address now share its per-IP limit, as people behind one IPv4 address already did. |
 
 ---
