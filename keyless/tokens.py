@@ -66,7 +66,9 @@ def cache_set(prefix: str, key: str, payload: dict[str, Any], expires_in_sec: in
 
 
 def cache_get(prefix: str, key: str) -> dict[str, Any] | None:
-	value = frappe.cache.get_value(f"{prefix}{key}")
+	# expires=True: read Redis, never a copy Frappe kept for the request, so a
+	# value cannot outlive its TTL or a delete done outside delete_value.
+	value = frappe.cache.get_value(f"{prefix}{key}", expires=True)
 	return value if isinstance(value, dict) else None
 
 
