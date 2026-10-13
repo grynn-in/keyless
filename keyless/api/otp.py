@@ -8,10 +8,12 @@ from keyless.api.common import (
 	HOUR,
 	after_response,
 	get_ip_rate_limit,
+	limit_key,
 	limit_mail_requests,
 	normalize_email,
 	pretend_success_if_unknown,
 	require_enabled,
+	stored_email,
 	take_attempt,
 )
 from keyless.audit import log_event
@@ -34,13 +36,16 @@ def request_otp(email: str):
 	if not email or "@" not in email:
 		frappe.throw(_("Enter a valid email address"))
 
-	limit_mail_requests(email, settings, "otp")
+	# Limits follow the typed address as the database compares it (F-4).
+	limit_mail_requests(limit_key(email), settings, "otp")
 
 	expires = int(settings.otp_expiry_seconds or 300)
 	length = int(settings.otp_length or 6)
-	if not settings.hide_user_enumeration and not pretend_success_if_unknown(email):
+	# Looked up once, before the response, for known and unknown addresses alike.
+	user = pretend_success_if_unknown(email)
+	if not settings.hide_user_enumeration and not user:
 		frappe.throw(_("No active user found"), frappe.DoesNotExistError)
-	after_response(lambda: _deliver_otp(email, expires, length))
+	after_response(lambda: _deliver_otp(email, user, expires, length))
 
 	return {"ok": True, "expires_in": expires, "length": length}
 
@@ -58,9 +63,13 @@ def verify_otp(email: str, otp: str):
 	# requesting a new code does not buy more guesses (audit M-1). Account-wide, not
 	# per IP: this is what bounds guessing a 6-digit code, so it must not grow with
 	# the attacker's IPs. A person locked out here can still use a magic link or a passkey.
-	give_back = take_attempt("otp-guess-hour", email, max_attempts * ACCOUNT_GUESS_FACTOR, HOUR, per_ip=False)
+	# Counted per address as the database compares it; the code itself is kept under
+	# the account, so any spelling that reaches the account can use it (F-4).
+	give_back = take_attempt(
+		"otp-guess-hour", limit_key(email), max_attempts * ACCOUNT_GUESS_FACTOR, HOUR, per_ip=False
+	)
 	user = pretend_success_if_unknown(email)
-	if not user or not verify_and_consume_otp(email, otp or "", max_attempts):
+	if not user or not verify_and_consume_otp(user, otp or "", max_attempts):
 		log_event("otp_failed", user=email, method="email_otp", success=False)
 		frappe.throw(_("Invalid or expired code"), frappe.AuthenticationError)
 
@@ -69,15 +78,18 @@ def verify_otp(email: str, otp: str):
 	return {"ok": True, "user": user, "home": _home_for(user)}
 
 
-def _deliver_otp(email: str, expires: int, length: int) -> None:
-	"""Create and mail a code if the address has an account; runs after the response."""
-	user = pretend_success_if_unknown(email)
-	if not user:
-		log_event("otp_requested", user=email, method="email_otp", success=False, detail="unknown")
+def _deliver_otp(email: str, user: str | None, expires: int, length: int) -> None:
+	"""Create and mail a code if the address has an account (`user`, resolved by the
+	request); runs after the response. The code is kept under the account and mailed
+	to the address stored on it, not to the address as typed (F-4)."""
+	recipient = stored_email(user) if user else None
+	if not recipient:
+		detail = "no_email" if user else "unknown"
+		log_event("otp_requested", user=user or email, method="email_otp", success=False, detail=detail)
 		return
 	otp = random_otp(length)
-	store_otp(email, otp, expires)
-	_send_otp_mail(email, otp, expires)
+	store_otp(user, otp, expires)
+	_send_otp_mail(recipient, otp, expires)
 	log_event("otp_requested", user=user, method="email_otp", success=True)
 
 

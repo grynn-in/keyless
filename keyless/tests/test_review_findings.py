@@ -217,7 +217,7 @@ class TestDeferredMailFailure(ReviewCase):
 		set_request(method="POST", path="/api/method/keyless.api.otp.request_otp")
 		frappe.local.request.after_response = callbacks = CallbackManager()
 		with patch.object(otp, "store_otp", side_effect=RuntimeError("redis down")):
-			common.after_response(lambda: otp._deliver_otp(USER, 300, 6))
+			common.after_response(lambda: otp._deliver_otp(USER, USER, 300, 6))
 			callbacks.run()
 		frappe.db.rollback()
 		self.assertTrue(frappe.db.exists("Error Log", {"method": self.TITLE}))

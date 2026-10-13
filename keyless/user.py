@@ -87,11 +87,14 @@ def set_unusable_password(user: str) -> None:
 
 
 def resolve_enabled_user(email: str) -> str | None:
-	"""Return the User name for an enabled account, or None. Does not throw."""
+	"""Return the User name for an enabled account, or None. Does not throw.
+
+	Both lookups always run, so an address with an account and one without take
+	the same work: the sign-in request handlers call this before they answer (F-4).
+	"""
 	if not email:
 		return None
 	email = email.strip().lower()
-	name = frappe.db.get_value("User", {"name": email, "enabled": 1}, "name")
-	if name:
-		return name
-	return frappe.db.get_value("User", {"email": email, "enabled": 1}, "name")
+	by_name = frappe.db.get_value("User", {"name": email, "enabled": 1}, "name")
+	by_email = frappe.db.get_value("User", {"email": email, "enabled": 1}, "name")
+	return by_name or by_email
