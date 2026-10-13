@@ -219,7 +219,7 @@ requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 | A link was sent before this change | It works from any browser until it expires (at most **Magic Link Expiry**). |
 
 How it works: asking for a link gives the browser a random ID in the `keyless_link_browser`
-cookie (HttpOnly, SameSite=Lax, kept for the link's lifetime; reused for later links, so every
+cookie (HttpOnly, SameSite=Lax, kept for the link's lifetime whatever the site's time zone; reused for later links, so every
 link a browser asked for keeps working). A digest of the ID is stored with the link. Every
 request gets the cookie, whether or not the address has an account. People who read mail
 on another device should use an email code, which works anywhere.
@@ -431,6 +431,7 @@ From the follow-up audit of 10 October 2026:
 | Change | What to do |
 |---|---|
 | Keyless requires cbor2 5.9.0 or later, but below 6. The passkey library uses cbor2 to read what the browser sends (G-6; CVE-2026-26209). cbor2 6 is a breaking rewrite; the passkey library version Keyless uses was built on cbor2 5 | Run `bench setup requirements` before `bench migrate`, then restart. To upgrade cbor2 by hand, run `pip install "cbor2>=5.9.0,<6"` in the bench env. Do not run `pip install -U cbor2`: it installs cbor2 6. |
+| The magic-link browser cookie now lasts exactly **Magic Link Expiry** in every site time zone (G-3). Before, its expiry was the site's local time read as UTC: on sites west of UTC the cookie had already expired, so every magic link was refused as "another browser"; east of UTC it outlived the link by the UTC offset | Nothing. On sites west of UTC, tell users magic links work again. |
 
 ---
 

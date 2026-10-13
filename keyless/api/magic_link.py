@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import add_to_date, escape_html, get_url, now_datetime
+from frappe.utils import escape_html, get_url
 from frappe.utils.oauth import redirect_post_login
 
 from keyless.api.common import (
@@ -44,9 +44,10 @@ def _bind_to_browser(expiry_min: int) -> str:
 	browser = _browser_id() or random_token(32)
 	cookie_manager = getattr(frappe.local, "cookie_manager", None)
 	if cookie_manager:
-		cookie_manager.set_cookie(
-			BROWSER_COOKIE, browser, expires=add_to_date(now_datetime(), minutes=expiry_min), httponly=True
-		)
+		# max_age, not expires: Frappe's now_datetime() is naive site-local time, which
+		# Werkzeug would send as GMT (cookie already expired west of UTC; audit G-3).
+		# Werkzeug derives a matching UTC Expires from max_age for older browsers.
+		cookie_manager.set_cookie(BROWSER_COOKIE, browser, max_age=expiry_min * 60, httponly=True)
 	return browser
 
 
