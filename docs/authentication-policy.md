@@ -198,6 +198,30 @@ Limits per client IP only stop floods from one address, so that a whole office b
 IP is not locked out: 20 times **Rate Limit per Hour** for code, link and recovery-code
 requests (100 by default), and 200 times for passkey sign-in (1000 by default).
 
+### Allowed values for the numeric settings
+
+Keyless Settings refuses to save a number outside these ranges, with *"<setting> must be
+between <low> and <high>"*. A blank field means the default; saving writes the default in.
+
+| Setting | Allowed | Default | Why the bound |
+|---|---|---|---|
+| **OTP Length** | 6 to 8 | 6 | Shorter codes can be guessed within the limits; the login page takes at most 8 digits. |
+| **OTP Expiry (seconds)** | 60 to 3600 | 300 | |
+| **Max OTP Attempts** | 1 to 10 | 5 | Each account gets twice this many wrong guesses an hour. |
+| **Rate Limit per Hour** | 1 to 100 | 5 | The per-IP limits are 20 and 200 times this. |
+| **Daily Code Limit per Account** | 1 to 1000 | 10 | |
+| **Magic Link Expiry (minutes)** | 2 to 60 | 10 | |
+| **Step-up Window (minutes)** | 1 to 60 | 5 | |
+| **Audit Retention (days)** | 30 to 3650 | 90 | A short or negative value let the daily purge empty the audit log. |
+
+Before F-9, negative values were accepted. A negative limit refused every request, so it
+switched the factor off rather than lifting the limit.
+
+Every change of **Audit Retention** is written to the audit log as `audit_retention_changed`
+(section 7), because shortening it deletes audit entries. The daily purge applies the same
+bounds to the stored value, so a value written without saving the form (for example by SQL)
+cannot shorten retention below 30 days; 0 or less counts as 90.
+
 ### What people see when they request a code or link
 
 | If… | Then… |
@@ -400,6 +424,7 @@ New or changed events in **Keyless Audit Log**:
 | `passkey_failed` | Passkey sign-in refused | New `detail` values: `user_handle_mismatch`, `user_disabled`, and the verification library's message. |
 | `passkey_register_failed` | Passkey registration refused | Was never recorded before this release; the event name was missing from the log's list. |
 | `step_up` / `step_up_failed` | Someone confirmed it was them (or failed to) before changing sign-in methods | `method` is `passkey` or `email_otp`. |
+| `audit_retention_changed` | **Audit Retention (days)** changed in Keyless Settings, or by the migrate (F-9) | `user` is who saved the settings and `method` is `settings`, or `migrate`. `detail` is `<old> -> <new> by <user or migrate>`; `0` means blank. |
 | `backup_failed` | Recovery code refused | Now also logged for addresses with no account (`user` is `Guest`). `detail` is `already_used` when another request used the code first. |
 
 ---
@@ -441,6 +466,7 @@ From the follow-up audit of 10 October 2026:
 | Deleting a passkey from Desk or REST now emails the owner and is logged (F-2) | Nothing; keep the scheduler running so the queued mail goes out. |
 | Passkey add and remove entries are logged by the record, with `by <user>` when someone else acted | Update any alert that matched the old empty `detail`. |
 | The Keyless fields on User are System Manager only (permission level 1); users no longer see the Keyless section on their own record (F-3) | Run `bench migrate` (the patch and `after_migrate` update the fields). If you added Custom DocPerms giving other roles level 1 on User, those roles can change the flag too. Check the Error Log for "Keyless: review Passwordless Only changes" and turn the flag back on for anyone listed. |
+| Numeric settings must be inside fixed ranges (section 3, "Allowed values for the numeric settings"); OTP Length is at least 6 and Audit Retention at least 30 days; changes to Audit Retention are logged as `audit_retention_changed` (F-9) | The migrate changes any stored value outside its range to the nearest bound, lists each change in the Error Log ("Keyless: settings out of range") and logs retention changes in the audit log. An Audit Retention of 0 or less becomes 90, not 30. Blank values get their default without an Error Log entry (the app already used the default). Check the list: a site that used 4-digit codes now sends 6-digit codes, and one that kept fewer than 30 days of audit log now keeps 30. The migrate never stops over this; if the check itself fails it undoes its changes and logs "Keyless: settings bounds patch failed". |
 
 ### From the audit of 12 October 2026
 

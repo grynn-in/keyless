@@ -8,8 +8,9 @@ from frappe.utils import add_days, now_datetime
 
 def purge_old_audit_logs():
 	try:
-		days = frappe.db.get_single_value("Keyless Settings", "audit_retention_days") or 90
-		cutoff = add_days(now_datetime(), -int(days))
+		from keyless.keyless.doctype.keyless_settings.keyless_settings import audit_retention_days
+
+		cutoff = add_days(now_datetime(), -audit_retention_days())
 		frappe.db.delete("Keyless Audit Log", {"event_on": ("<", cutoff)})
 		frappe.db.commit()
 	except Exception:
