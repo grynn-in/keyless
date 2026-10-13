@@ -528,17 +528,7 @@ From the follow-up audit of 10 October 2026:
 | Removing a passkey through `keyless.api.passkey.revoke_passkey` needs a recent sign-in or confirmation, like adding one (G-4) | Nothing for Keyless's own screens. A custom screen or script that calls `revoke_passkey` must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. Deleting a User Passkey from Desk or REST as a System Manager is unchanged. |
 | Removing your own passkey needs a recent sign-in or confirmation, like adding one, whether through `keyless.api.passkey.revoke_passkey` or by deleting the User Passkey record (Desk, list-view bulk Delete, `/api/resource`, `frappe.client.delete`). A System Manager using `revoke_passkey` for someone else's passkey needs it too (G-4) | Nothing for Keyless's own screens. A custom screen or script run from a user's session that removes passkeys must call `keyless.ensure_recent_auth()` first (Desk), or handle the *"Confirm it's you"* refusal. A System Manager deleting someone else's User Passkey record from Desk or REST, and server code with no session (`bench console`, patches), are unchanged. |
 | Login-page and magic-link targets whose dot segments or encoded slashes resolve to `//…` are refused (G-2) | Nothing for normal use. Ordinary paths, including `/./x`, `/a/../b` and encoded doc names such as `INV%2F001`, still work. |
-
-### From the audit of 12 October 2026
-
-| Change | What to do |
-|---|---|
 | System Managers can no longer delete Keyless Audit Log entries through the document, and nobody can edit them (G-8) | Nothing for normal use. To remove entries, sign in as Administrator. Changes to **Audit Retention (days)** are audited, and its minimum is 30 days. |
-
-### From the audit of 12 October 2026
-
-| Change | What to do |
-|---|---|
 | System Managers can no longer create or edit Keyless Backup Code records; codes only come from the user's own **New Backup Codes**, and no one can save an existing code (G-1) | Nothing, unless an integration created or edited codes directly. If you gave other roles create or write on the doctype with Role Permission Manager, remove it; the controller refuses those changes anyway. |
 | New codes are stored with a hash bound to the user (`hash_version` 2) | Nothing. Existing codes keep working for their own user; users do not need to generate new ones. |
 | Codes stored before G-1 that their user did not generate stop working: the creator, or for an unused code the last editor, is someone else | Check the Error Log for "Keyless: review Keyless Backup Code ownership" after the migrate. Users listed there can generate new codes. |
