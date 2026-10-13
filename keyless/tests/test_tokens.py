@@ -6,7 +6,16 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from keyless.tokens import compare, digest, random_otp, store_otp, verify_and_consume_otp
+from keyless.tokens import (
+	_raw_key,
+	cache_get,
+	cache_set,
+	compare,
+	digest,
+	random_otp,
+	store_otp,
+	verify_and_consume_otp,
+)
 
 
 class TestTokens(FrappeTestCase):
@@ -39,3 +48,11 @@ class TestTokens(FrappeTestCase):
 		self.assertEqual(len(random_otp(6)), 6)
 		self.assertEqual(len(random_otp(2)), 4)
 		self.assertEqual(len(random_otp(99)), 8)
+
+	def test_cache_get_reads_redis_not_the_request_cache(self):
+		# Codes, links and challenges expire in Redis. A value read earlier in the same
+		# request must not outlive its Redis key through Frappe's per-request cache.
+		cache_set("keyless:test:", "k", {"v": 1}, 60)
+		self.assertEqual(cache_get("keyless:test:", "k"), {"v": 1})
+		frappe.cache.delete(_raw_key("keyless:test:k"))  # as when the TTL runs out
+		self.assertIsNone(cache_get("keyless:test:", "k"))
